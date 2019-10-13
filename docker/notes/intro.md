@@ -256,3 +256,123 @@ docker rm wp # remove stopped containers
 docker run --rm --name auto-exit-test busybox:latest echo Hello World
 docker ps -a
 ```
+
+## Installing specific software using Docker
+
+Docker creates containers from images. An image is a file which holds files that will be available to containers created from it and metadata about the image. This metadata contains information about relationships between images, the command history for an image, exposed ports, volume definitions and more. Images have identifiers so they could be used as a name and version for the software. They are long, unique sequences of letters and numbers. Users usually work with repositories because image identifiers are difficult to work with due to their unpredicatability.
+
+A **repository** is named bucket of images. The name is similar to a URL. A repository's name is made up of the name of the host where the image is located, the user account that owns the image and a short name. For example, `quay.io/dockerinaction/ch3_hello_registry`. A new version of the image gets a tag assigned to it to identify it. A single image can have several tags. So, there can be same image with tags like 7-jdk, 7u71-jdk, openjdk-7, etc. To find images, we can look at Docker Hub. Docker Hub is a registry and index and is the default registry and index used by Docker. When we issue `docker pull` or `docker run` without specifying alternative registry, Docker will look for the repository on Docker Hub. Docker Hub also provides a set of official repositories that are maintained by Docker Inc. or software maintainers. These are called *libraries*.
+
+Image authors can publish their images on Docker Hub by:
+- Using the command line to push images that they built independently and on their own systems.
+- Make a Dockerfile publicly available and use Docker Hub's continuous build system. Images created from these automated builds are preferred because the Dockerfile is avilable for examination prior to installing the image. These images will be marked as trusted.
+
+For authenticating with Docker Hub registries that you control, you can use `docker login` command. We can logout using `docker logout`. We can search for repositories using `docker search` command.
+
+Run docker in interactive session for a repository
+
+```shell
+docker run -it dockerinaction/ch3_ex2_hunt
+docker rmi dockerinaction/ch3_ex2_hunt
+```
+
+**1. Alternate registries**
+
+Using an alternate registry to download images is simple.  All we need is the address of the registry.
+
+```shell
+docker pull quay.io/dockerinaction/ch3_hello_registry:latest
+docker rmi quay.iodockerinaction/ch3_hello_registry
+```
+
+**2. Images as Files**
+
+Docker provides a command to load images into Docker from a file. If you receive image in single file, we can load file using `docker load` command. To save an image file, we can use `docker save` command. This command creates TAR archive files.
+
+```shell
+# Install an image to export
+docker pull busybox:latest
+# export and save an image as tar
+docker save -o myfile.tar busybox:latest
+docker rmi busybox # remove this image
+docker images # make sure that image is not available
+docker load -i myfile.tar # re-load image from tar file
+```
+
+**3. Installing from Dockerfile**
+
+A Dockerfile is a script that describes steps for Docker to take to build a new image. These files are distributed along with software that the author wants to be put into an image. Distributing a Dockerfile is similar to distributing image files. We can build docker image using Dockerfile
+
+```shell
+# This repo contains Dockerfile file
+git clone https://github.com/dockerinaction/ch3_dockerfile.git
+docker build -t dia_ch3/dockerfile:latest ch3_dockerfile
+```
+
+Docker image is installed on `dia_ch3/dockerfile:latest` which is specified using `-t` option.
+
+A **layer** is an image that's related to at least one other image. Images maintain parent/child relationships and they build from their parents and form layers. The files available to a container are the union of all the layers in the lineage of the image the container was created from. An image is named when its author tags and publishes it. A user can create aliases using the `docker tag` command. Until the image is tagged, the only way to refer to it is to use UID that was generated when the image was built. From the perspective of the container, it has exclusive copies of the files provided by the image. This is made possible with a union file system. The file system is used to create mount points on your host's file system that abstract the use of layers. The most important benefit of such layered approach is that common layers need to be installed only once. 
+
+## Volumes
+
+A **volume** is a mount point on the container's directory tree where a portion of the host directory tree has been mounted. Altough the union file system works for building and sharing images, volumes are useful for working with persistent or shared data. A volume is a tool for segmenting and sharing data that has a scope or life cycle that's independent of a single container. For example, web application versus log data, Data processing application versus input and output data, Web server versus static content, Products versus support tools.
+
+Let's try using Volumes with Cassandra image. Cassandra is NoSQL database taht stores its data in files on disk. We will create single-node Cassandra cluster, create a keyspace, delete the container and recover the keyspace on a new node in another container.
+
+```shell
+docker run -d \
+    --volume /var/lib/cassandra/data \ # specify volume mount point inside the container
+    --name cass-shared \
+    alpine echo Data container
+
+# Inherit volume definitions from earlier container
+docker run -d \
+    --volumes-from cass-shared \
+    --name cass1
+    cassandra:2.2
+
+# After this both containers have a volume mounted at /var/lib/cassandra/data
+# Run Cassandra client tool 
+docker run -it --rm \
+    --link cass1:cass \
+    cassandra:2.2 cqlsh cass
+```
+
+```sql
+select * from system.schema_keyspaces where keyspace_name = 'docker_hello_world';
+-- create keyspace
+create keyspace docker_hello_world
+  with replication = {
+    'class': 'SimpleStrategy',
+    'replication_factor': 1
+  };
+quit
+```
+
+Now, let's remove cassandra container.
+
+```shell
+docker stop cass1
+docker rm -vf cass1
+```
+
+Now, If modifications we made are persisted, the only place is the volume container.
+
+```shell
+docker run -d 
+    --volumes-from cass-shared --name cass2
+    cassandra:2.2
+
+docker run -it --rm
+    --link cass2:cass 
+    cassandra:2.2 cqlsh cass
+```
+
+```sql
+select * from system.schema_keyspaces where keyspace_name= 'docker_hello_world';
+quit
+```
+
+`docker rm -vf cass2 cass-shared`
+
+### Volume types:
