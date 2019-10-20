@@ -376,3 +376,436 @@ quit
 `docker rm -vf cass2 cass-shared`
 
 ### Volume types:
+
+There are two types of volume. Every volume is a mount point on the container directory tree to a location on the host directory tree, but the types differ in where that location is on the host. 
+
+**Bind mount** volumes use any user-defined directory or file on the host OS. A bind mount volume are useful when the host provides some file or directory that needs to be mounted into the container directory tree at a specific point. These are useful if you want to share data that lives on your host at some known location with a specific program that runs in a container. We could use docker to work on web application and share the code with nginx server to serve the website. We could use Docker to launch the web server and bind mount the location of document into the new container at the web server's document root. For example, if we create an `~/example-docs/index.html` then we can bind that to Apache HTTP server's document root using this command.
+
+```shell
+docker run -d --name bmweb \
+    -v ~/example-docs:/usr/local/apache2/htdocs \
+    -p 80:80 httpd:latest
+```
+
+Visit `http://local` and we can see our page. We use `-v` option to bind absolute path on host file system to the location where it should be mounted inside the container. The path should be specified with absolute paths. This overrides the content of `/usr/local/apache2/htdocs/` by the content on the host.
+
+Suppose you want Apache HTTP web server not to be able to change the contents of this volume to minimize the impact of attack on your website, we can mount volumes as read-only by appending `:ro` to the volume mapping. This will prevent any process inside the container from modifying the content of the volume.
+
+```shell
+docker rm -vf bmweb
+docker run --name bmweb_ro \
+    --volume ~/example-docs:/usr/local/apache2/htdocs/:ro
+    -p 80:80 httpd:latest
+
+# below command fails
+docker run --rm -v ~/example-docs:/testspace:ro \
+    alpine /bin/sh -c 'echo test > /testspace/test'
+```
+
+Finally, if we specify a host directory that doesn't exist, Docker will create it for you.
+
+```shell
+ls ~/example-docs/absent # directory doesn't exist
+docker run --rm -v ~/example-docs/absent:/absent alpine:latest \
+    /bin/sh -c 'mount | grep absent'
+ls ~/example-docs/absent/ # directory exists now
+```
+
+We can use bind mount volumes to mount individual files. This provides flexibility to create or link resources at a level that avoids conflict with other resources. The important thing in this case its that the file must exist on the host before you create the container otherwise Docker will assume that you wanted to use a directory.
+
+However, such mounts create an opportunity for conflict with other containers. For example, if multiple instances of Cassandra use the same host location as a volume, then each of the instances would compete for the same set of files. Without tools like file locks, they would likely result in corruption of the database. Bind mount volumes are appropriate tools for workstations. We can take advantage of volumes in a host-agnostic and portable way with Docker-managed volumes.
+
+
+**Managed volumes** use locations that are created by the Docker daemon in space controller by the daemon, called Docker managed space. In managed volumes, Docker daemon creates managed volumes in a portion of the host's file system that's owned by Docker. Using managed volumes is a method of decoupling volumes from specialized locations on the file system. Managed volumes are created when you use `-v` option on `docker run` but only specify the mount point in the container directory tree.
+
+```shell
+docker run -d \
+    -v /var/lib/cassandra/data \
+    --name cass-shared \
+    alpine echo Data Contaienr
+```
+
+When above container is create, Docker daemon created directories to store the contents of the three volumes somewhere in a part of the host file system that it controls.
+
+```shell
+docker inspect -f "{{json .Volumes}}" cass-shared
+```
+
+Above command would show the location of the directory on the host file system where it is mounted. With Docker managed volumes, you say "I need place to put some data that I'm working with.". This is something Docker can fill on any machine with Docker installed. When we're done and we ask Docker to clean things up for us, Docker can confidently remove any directories or files that are no longer being used by a container. This avoid clutter.
+
+### Sharing volumes between different containers
+
+Suppose we have a web server which writes logs to `/logs/access`. If we want to move those logs off web server into more permanent storage, we might do that with a script inside another container. There are two ways to share volumes between containers.
+
+**Host-dependent sharing**
+
+Two or more containers are said to use host-dependent sharing when each has a bind mount volume for a single known location on the host file system.
+
+```shell
+mkdir ~/web-logs-example # set up known location
+docker run --name plath -d \
+    -v ~/web-logs-example:/data \
+    dockerinaction/ch4_writer_a
+docker run --rm \
+    -v ~/web-logs-example:/reader-data \
+    alpine:latest \
+    head /reader-data/logA
+cat ~/web-logs-example/logA
+docker stop plath # stop the writer
+```
+
+Host-dependent sharing requires you to use bind mount volumes but this might be expensive to maintain if you're working with large number of machines.
+
+**Generalized sharing**
+
+The `docker run` command provides a flag that will copy the volumes from one or more containers to the new container. The flag `--volumes-from` can be set multiple times to specify multiple source containers.
+
+```shell
+docker run --name fowler \
+    -v ~/example-books:/library/PoEAA \
+    -v /library/DSL \
+    alpine:latest \
+    echo "Fowler collection created."
+
+docker run --name knuth \
+    -v /library/TAoCP.vol1 \
+    -v /library/TAoCP.vol2 \
+    -v /library/TAoCP.vol3 \
+    -v /library/TAoCP.vol4.a \
+    alpine:latest echo "Knuth collection created."
+# Container reader copied all the volumes defined by both fowler and knuth.
+docker run --name reader \
+    --volumes-from fowler \
+    --volumes-from knuth \
+    alpine:latest ls -l /library/ # List all volumes as they were copied into new container
+docker inspect reader # check volume list for reader
+```
+
+We can also copy volumes directly or transitively. So, if we're copying the volumes from another container, we'll also copy the volumes that it copied from some other container. Copied voluems always have the same mount point. We can't use `--volumes-from` in three situations. 
+(1) If the container you're building needs a shared volume mounted to a different location. 
+(2) Another is when volume sources conflict with each other or a new volume specification. If same mount point is specified, then a consumer of both will receive only one of the volume definitions.
+
+```shell
+docker run --name chomsky --volume /library/ss \
+    alpine:latest echo "Chomsky collection created."
+docker run --name lamport --volume /library/ss \
+    alpine:latest echo "Lamport collection created"
+docker run --name student \
+    --volumes-from chomsky --volumes-from lamport \
+    alpine:latest ls -l /library/
+docker inspect student
+```
+
+(3) Third condition where `--volumes-from` can't be used is if you need to change the write permission of a volume. This is because it copies the full volumes definition. For example, if source has a volume mounted with read/write permission and you want to share that with a containe that should have only read access, using `--volumes-from` won't work.
+
+### Managed volume life cycle
+
+Managed volumes have life cycles that are independent of any container. Managed volumes are second-class entities. Managed volumes are only created when you omit a bind mount source, and they're only identifable by the containers that use them. A container owns all managed volumes mounted to its file system. Cleaning up managed volumes is a manual task. Docker can't delete bind mount volumes because the source exists outside the Docker scope. Docker can delete managed volumes when deleting containers. Running `docker rm` with `-v` option will try to delete any managed volumes referenced by the target container. Any managed volumes that are referenced by other containers will be skipped, but internal counters will be decremented. Always use `-v` option when removing contaienr. Orphan volumes (volumes whose container has been removed) render disk space unstable until they've been cleaned.
+
+`docker rm -v student`
+
+We can remove all stopped containers and their volumes using `docker rm -v $(docker ps -aq)` command.
+
+### Advanced container patterns
+
+**1. Volume container pattern**
+
+This is when you come across a case for sharing a set of volumes with many containers or if you can categorize a set of volumes that fit a common use case. Volume containers are important for keeping a handle on data even in cases where a single container should have exclusive access to some data. Suppose you wanted to update your database. If your DB container writes its state to a volume and that volume was defined by a volume container, the migration would be as simple as shutting down the original database container and starting the new one with the volume container as a volume source.
+
+**2. Data-packed volume containers**
+
+Volume containers are in a unique position to seed volumes with data. THe data-packed volume containers describe how images can be used to distribute static resources like configuration or code for use in containers created with other images. A data-packed volume container is built from an image that copies static content from its image to volumes it defines. Data is packed and distributed in an image that defines a volume. At container-creation time the data is copied into the volume and is accessible to any containers that use this volume container. This could be built by hand if we have an image that has data you'd like to make available by running and defining the volume and running a `cp` command at creation time.
+
+```shell
+docker run --name dpvc \
+    -v /config \
+    dockerinaction/ch4_packed /bin/sh -c 'cp /packed/* /config/' # copy image content into new volume
+docker run --rm --volumes-from dpvc \
+    alpine:latest ls /config # List shared material
+docker run --rm --volumes-from dpvc \
+    alpine:latest cat /config/packedData
+docker rm -v dpvc
+```
+
+**3. Polymorphic container pattern**
+
+A polymorphic tool lets you interact with a consistent way but might have special implementations that do different things. A polymorphic container is one that provides some functionality that's easily substituted using volumes. For example, if an image contains the binaries for NodeJS and by default executes a command that runs the NodeJS program located at `/app/app.js`. We can change the behavior of containers created from this image by injecting new `app.js` using a volume mounted at `/app/app.js`. 
+
+For example, deploying a multi-state application deployment pipeline where application configuration would change depending on where it is deployed.
+
+```shell
+docker run --name devConfig  \
+    -v /config \
+    dockerinaction/ch4_packed_config:latest \
+    /bin/sh -c 'cp /development/* /config/' # copy development configuration
+docker run --name prodConfig \
+    -v /config \
+    dockerinaction/ch4_packed_config:latest \
+    /bin/sh -c 'cp /production/* /config/' # copy production configuration
+# Run dev app with devConfigurations
+docker run --name devApp \
+    --volumes-from devConfig \
+    dockerinaction/ch4_polyapp 
+# run production app with production configurations
+docker run --name prodApp \
+    --volumes-from prodConfig \
+    dockerinaction/ch4_polyapp
+```
+
+## Networking with Docker
+
+Docker is mostly concerned with two types of networks. The first is the one that a host computer is connected to. The second is a virtual network that Docker creates to connect all of the running containers to the host network which is called *bridge*. Bridge is a network that connects multiple networks so that they can function as a single network. They work by selectively forwarding traffic between the connected networks based on another type of network address. 
+
+### Docker container networking
+
+Docker is about single-host virtual networks and multi-host networks. Local networks provide container isolation. In multi-host virtual networks, any container will have its own routable IP addresses. The virtual network is local to the machine where Docker is installed and is made u pof routes between participating containers and to host. Containers have their own private loopback interface and a separate Ethernet interface linked to another virtual interface in the host's namespace. This creates a separate link between host and each container. Each container is assigned a unique private IP address that's not directly reachable from external network. Connections are routed through the Docker bridge called `docker0`. Using `docker` commnad line tools, we can customize IP addresses used, the host interface that docker0 is connected to and the way containers communicate with each other. Docker uses kernel namespaces to create private virtual interfaces. Network exposure or isolation is provided by host's firewall rules.
+
+All Docker containers follow one of the four archetypes. They define how a container interacts with other local containers and the host's network.
+
+- Closed containers
+- Bridged conainers
+- Joined containers
+- Open containers
+
+#### Closed containers 
+
+It doesn't allow any network traffic. In this, processes inside container need to communicate only with themselves or each other. Docker builds this types of container by skipping the step where an externally accesible network interface is created. The closed archetype has no connection to the Docker bridge interface. All Docker containers have access to a private loopback interface. By creating private loopback interfaces for each container, Docker enables programs run inside a container to communicate but without communication leaving that container.
+
+```shell
+docker run --rm \
+    --net none \ # create closed container
+    alpine:latest
+    ip addr
+```
+
+The only network interface available is loopback address 127.0.0.1. This means it cannot connect to anything outside the container. Try below command to see.
+
+```shell
+docker run --rm \
+    --net none \
+    alpine:latest \
+    ping -w 2 8.8.8.8 # ping google
+```
+
+#### Bridged Containers
+
+Docker creates bridged containers by default. This archetype is most customizable and should be hardened. They have private loopback interface and another private interface that's connected to the rest of the host through a network bridge. All interfaces connected to docker0 are part of the same virtual subnet. This means they can communicate with each other and with larger network through the docker0 interface.
+
+The most common reason to choose this is that the process needs access to the network.
+
+```shell
+docker run --rm \
+    --net bridge \ # even if we remove this option, it will create bridge archetype
+    alpine:latest \
+    ip addr # list network addresses, there are two loopback and broadcast
+docker run --rm \
+    alpine:latest \
+    ping -w 2 8.8.8.8
+```
+
+DNS is a protocol for mapping host names to IP addresses. `docker run` has a `--hostname` flag that can be used to set the host name of a new container. This adds an entry to the DNS override system inside the container. This entry maps the host name to the container's bridge IP address.
+
+```shell
+docker run --rm \
+    --hostname  barker \
+    alpine:latest \
+    nslookup barker
+```
+
+Setting hostname of a container is useful when programs running inside a container need to look up their own IP address. If we can use external DNS server, we can share these hostnames with other containers. We can specify one or more DNS servers for a container using below command.
+
+```shell
+docker run --rm \
+    --dns 8.8.8.8 # set primary DNS server to google's public DNS service
+    alpine:latest \
+    nslookup docker.com
+```
+
+`--dns` flag can be set multiple times to set multiple DNS servers in case one or more are unreachable. The DNS option `--dns-search` allows to specify a DNS search domain. With this one set, any host names that don't have a known top-level domain will be searched for with the specified suffix appended.
+
+```shell
+docker run --rm \
+    --dns-search docker.com \ # Set search domain
+    busybox:latest
+    nslookup registry.hub # Look up shortcut for registry.hub.docker.com
+```
+
+This can be useful. For example, if you maintain a single DNS server for development and test environment, rather than building environment-aware software, we can consider using DNS search domains and using environment-unaware names.
+
+```shell
+docker run --rm \
+    --dns-search dev.mycompany \
+    busyxbox:latest \
+    nslookup myservice # Resolves myservice.dev.mycompany
+docker run --rm \
+    --dns-search test.mycompany \
+    busybox:latest \
+    nslookup myservice # Resolves to myservice.test.mycompany
+```
+
+The `--add-host` flag on `docker run` command lets you provide a custom mapping for an IP addresses and host name pair. This flag cannot be set as a default at daemon startup. We could use it to route traffic for a particular destination through a proxy. 
+
+```shell
+docker run --rm \
+    --add-host test:10.10.10.255 \ # Add host entry
+    alpine:latest \
+    nslookup test # REsolves to 10.10.10.255
+```
+
+All custom mappings live in a file at `/etc/hosts` inside container.
+
+```shell
+docker run --rm \
+    --hostname mycontainer \ # set hostname
+    --add-host docker.com:127.0.0.1 \
+    --add-host test:10.10.10.2 \ # create entry
+    alpine:latest \
+    cat /etc/hosts # view all host entries
+```
+
+DNS (name to IP address map) provides a simple interface that can be used to decouple programs from specific network addresses.
+
+Host network is not accessible from host network by default as they are protected by host's firewall. There is no way to get to a container from outside the host. The `docker run` provides a flag `-p` or `--publish` that can be used to create a mapping between a port on host's network stack and the new container's interface. This can be of four forms:
+
+- `<containerPort>`: binds the container port to dynamic port on all host's interfaces. For example, `docker run -p 3333 ...`
+- `<hostPort>:<containerPort>`: binds specified container port to the specific port on each host's interfaces. Like, `docker run -p 80:80`
+- `<ip>::<containerPort>`: binds the container port to a dynamic port on the interface with specific IP address. `docker run -p 192.168.0.32::2222 ...`
+- `<ip>:<hostPort>:<containerPort>`: binds the container port to the specified port on the interface with specific IP address. For example, `docker run 192.168.0.32:1111:1111 ...`. Here, 192.168.0.32 is host's IP address.
+
+If we accept a dynamic or ephemeral port assignment on the host, we can use `-P` or `--publish-all` flag. We can expose multiple ports using two methods as shown below.
+
+```shell
+docker run -d --name dawson \
+    -p 5000 \ # export each port one by one
+    -p 6000 \
+    -p 7000 \
+    dockerinaction/ch5_expose
+docker run -d --name woolery \
+    -P \ # expose relevant ports that docker exposes
+    dockerinaction/ch5_woolery
+```
+
+The `docker run` command provides flag `--expose` that takes port numbers that the container should expose. This is used for `-p` option to find which ports to expose.
+
+```shell
+docker run -d --name philbin \
+    --expose 8000 \
+    -P \
+    dockerinaction/ch5_expose
+```
+
+We can see which ports are mapped using `docker ps` or `docker inspect` or `docker port`.
+
+Now, for **inter-container communication**, all local containers are on the same bridge network connected to Docker bridge virtual interface (docker0).
+
+```shell
+# run `nmap` to scan all the interfaces attached to the bridge network
+docker run -it --rm dockerinaction/ch5_nmap -sS -p 3333 172.17.0.0/24
+```
+
+Here, it's looking for any interface that's accepting connections on port 3333. If we had another container with such a service, it would have discovered it. This may be risky as any container is fully accessible from any other local container. When we start the Docker daemon, we can configure to disallow network connections between containers. This is best practice in multi-tenant environments. This can be achieved using `--icc=false` when we start Docker daemon.
+
+`docker -d --icc=false ...`
+
+At worst, leaving inter-container communication enabled allows compromised programs within containers to attack other local containers.
+
+Docker provides three options for customizing bridge interface. These let you define the address and subnet of bridge, the range of IP addresses that can be assigned to containers and the maximum transmission unit (MTU).
+
+Using the `-bip` flag, we can set the IP addresses of the bridge interface the Docker will create and the size of the subnet using a classless inter-domain routing (CIDR) formatted address. For example, if we set value of `--bip` to `192.168.0.128/25` will set docker0 interface IP address to 192.168.0.128 and allows IP in range 192.168.0.128 to 192.168.0.255. We can customize which IP addresses in that network can be assigned to new containers using `--fixed-cidr` flag. If we wanted to reserve only 64 addresses, we could use 192.168.0.192/26. The range specified must be a subnet of the network assigned to the bridge. Network interfaces have a limit to the maximum size of a packet. By protocol, Ethernet have a maximum packet size of 1500 bytes. We can use `--mtu` to set the size in bytes using `docker -d --mtu 1200`.
+
+#### Joined Containers
+
+These containers share a common network stack. Interfaces are shared like managed volumes.
+
+```shell
+# Create closed container
+docker run -d --name brady \
+    --net none alpine:latest \
+    nc -l 127.0.0.1:3333
+# Create container and specify container value that new container should be joined to
+docker run -it \
+    --net container:brady \ # Either container name or its ID should be used.
+    alpine:latest netstat -al
+```
+
+These are two containers that are joined but has no access to larger network because they are closed containers. This is useful when two different programs with access to two different pieces of data need to communicate but shouldn't share direct access to the other's data. Such joined containers create port conflict issues if they are using same port. Communication between containers is subject to firewall rules. If one process needs to communicate with another on an unexposed port, the best thing is to join the containers.
+
+#### Open containers
+
+These containers have full access to the host's network. They provide no isolation. This is created when we speicfy `host` as the value of `--net` option.
+
+```shell
+docker run --rm \
+    --net host \
+    alpine:latest ip addr # you should see several interfaces listed
+```
+
+### Inter-container dependencies
+
+Bridge network assigns IP addresses to ontainers dynamically at creation time, so using them to setup small system may not be easy. When you create a new container, you can tell Docker to link it to any other container. That target container must be running when the new container is created. **Adding a link** on a new container does three things:
+1. Environment variables describing target container's end point will be created.
+2. The link alias will be added to the DNS override list of the new container with the IP address of the target container.
+3. If inter-container communication is disabled, Docker will add specific firewall rules to allow communication between linked containers.
+
+The ports that are opened for communication are those that have been exposed by the target container. So the `--expose` flag provides a shortcut for only one particular type of container to host port mapping when ICC is enabled. When ICC is disabled, `--expose` becomes a tool for defining firewall rules.
+
+```shell
+docker run -d --name importantData \
+    --expose 3306 \
+    dockerinaction/mysql_noauth \
+    service mysql_noauth start
+# Create link and setup alias to db
+docker run -d --name importantWebapp \
+    --link importantData:db \
+    dockerinaction/ch5_web startapp.sh -db tcp://db:3306
+docker run -d --name  buggyProgram \
+    dockerinaction/ch5_buggy # container has no route to importantData
+```
+
+In above example, when the web applications opens a database connection to tcp://db:3306, it will connect to database. In the last container, if inter-container communication is enabled, attackers could easily steal the data from the database in the importantData container. They can do network scan to identify open port and then gain access by opening a connection. If inter-container communication was disabled, an attacker would be unable to reach any other containers from the container running the compromised software.
+
+**Links** are one-way network dependencies created when one container is created and specifies a link to another. It takes `--link` argument which map a container name or ID to an alias. Software running inside a container needs to know the alias of the container or host it's connecting to so that it can perform the lookup. Similar to host names, link aliases become a sym bol that multiple parties must agree on for a system to operate correctly.
+
+`docker run --link a:alias-a --link b:alias-b ...`
+
+Below is a code for dockerinaction/ch5_ff to validate that a link named "database" has been set at startup. This is useful if ch5_ff needs to use database but other container was defined with different name or there is no link created with "database" name.
+
+```shell
+#!/bin/sh
+
+if [ -z ${DATABASE_PORT+x} ]
+then
+    echo "Link alias 'database' was not set!"
+    exit
+else
+    exec "$@"
+fi
+```
+
+Try below commands as some of them won't work.
+
+```shell
+docker run -d --name mydb --expose 3306 \
+    alpine:latest nc -l 0.0.0.0:3306
+docker run -it --rm \
+    dockerinaction/ch5_ff # It will fail.
+docker run -it --rm \
+    --link mydb:wrongalias dockerinaction/ch5_ff # won't work due to incorrect link
+docker run -it --rm \
+    link mydb:database dockerinaction/ch5_ff echo It worked.
+docker stop mydb && docker rm mydb # Shut down link target container
+```
+
+```shell
+docker run -d --name mydb \
+    --expose 2222 --expose 3333 --expose 4444/udp \
+    alpine:latest nc -l 0.0.0.0:2222 # create valid link target
+docker run -it --rm \
+    --link mydb:database \
+    dockerinaction/ch5_ff env # Create link and list environment variables
+docker stop mydb && docker rm mydb
+```
+
+These environment variables are available for any need application developers might have in connecting to linked containers.
+
+The nature of links is such that dependencies are directional, static and nontransitive (linked containers won't inherit links). Links work by determining the network information of a contaienr and then injecting that into a new container. Link can only be built from new containers to *running* containers. If the dependency stops, the link will be broken. 
