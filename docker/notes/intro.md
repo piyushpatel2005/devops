@@ -809,3 +809,194 @@ docker stop mydb && docker rm mydb
 These environment variables are available for any need application developers might have in connecting to linked containers.
 
 The nature of links is such that dependencies are directional, static and nontransitive (linked containers won't inherit links). Links work by determining the network information of a contaienr and then injecting that into a new container. Link can only be built from new containers to *running* containers. If the dependency stops, the link will be broken. 
+
+## Isolation in Docker
+
+### Resources allowances
+
+If the resource consumption of processes on a computer exceeds the available physical resources, the processes will experience performance issues and may stop running. If we want to make sure tha a program won't overwhelm others on the computer, we can set limit on the resources that it can use. Docker provides three flags for managing thee different types of resource allowances that we can set on a container, memory, CPU and devices.
+
+**Memory limits** restrict the amount of memory that processes inside a container can use. We can put a limit by using `-m` or `--memory` flag on `docker run` or `docker create` commands.
+
+```shell
+docker run -d --name ch6_mariadb \
+    --memory 256m \
+    --cpu-shares 1024 \
+    --user nobody \
+    --cap-drope all \
+    dockerfile/mariadb
+```
+
+This installs MariaDB and starts container with a memory limit of 256MB. Here, memory limits are not reservations means they are not guaranteed to be available. They are only protection from overconsumption. You must consider whether the software can operate with proposed memory allowance and whether the system support the allowance. On hosts that have swap space (virtual memory that extends onto disk), a container may realize the allowance. Docker does not detect memory issues. The best it can do is restart if `--restart` flag is used.
+
+**Processing time** is another important resource whose starvation will degrade performance. To set CPU shares of a container and establish its relative weight, both `docker run` and `docker create` has `--cpu-shares` flag.
+
+```shell
+docker run -d -P --name ch6_wordpress \
+    --memory 512m \
+    --cpu-shares 512 \ # relative weight of processor, so mariadb gets two processors for every one Wordpress cycle
+    --user nobody \
+    --cap-drop net_raw \
+    --link ch6_mariadb \
+    wordpress:4.1
+```
+
+We can find the port of this wordpress using `docker port ch6_wordpress` to get port number. Once we get port number, we can open `http://localhost:<port>` in browser. CPU shares are only enforced when there is contention for time on the CPU. The intent of this tool is to prevent one process from overwhelming a computer. Docker also has ability to assign a container to a specific CPU set. Context switching is expensive and may cause noticeable impact on the performance of system. We can use `--cpuset-cpus` flag to limit a container to execute only on specific set of CPU cores.
+
+```shell
+# Start container limited to a single CPU and run load generator
+docker run -d \
+    --cpuset-cpus 0 \ # restrict to CPU number 0
+    --name ch6_stresser dockerinaction/ch6_stresser
+
+# start a container to watch the load on the CPU under load
+docker run -it --rm dockerinaction/ch6_htop # run withing 30 seconds
+docker rm -vf ch6_stresser
+```
+
+If we use above with different `cpuset-cpus` value, we can see different processes assigned to different cores.
+
+**Devices access** is more like resource authorization control. In some conditions, it may be important to share devices between a host and specific container. We can use `--device` flag to specify a set of devices to mount into the container. If we have webcam at `/dev/video0`, it will be mounted at the same location using following:
+
+```shell
+docker -it --rm \
+    --device /dev/video0:/dev/video0 \
+    ubuntu:latest ls -al /dev
+```
+
+### Shared memory
+
+Linux has few tools for sharing memory between processes running on same computer. Such inter-process communication (IPC) performs at memory speeds. Docker creates a unique IPC namespace for each container by default. The IPC namespace prevents processes in one container from accessing the memory on the host or in other containers. The image `dockerinactionch6_ipc` contains both producer and consumer and they communicate using shared memory.
+
+```shell
+# creates message queue and starts broadcasting messages to it
+docker -d -u nobody --name ch6_ipc_producer \
+    dockerinaction/ch6_ipc -producer # start producer
+# pulls from the message queue and writes to the logs
+docker -d -u nobody --name ch6_ipc_consumer \
+    dockerinaction/ch6_ipc -consumer # start consumer
+docker logs ch6_ipc_producer
+docker logs ch6_ipc_consumer
+```
+
+With above commands, each process used the same key to identify the shared memory resource, but they referred to different memory. The reason is each container has its own shared memory namespace. To run programs that communicate with shared memory in different containers, we'll need to join their IPC namespaces with `--ipc` flag which will create a new container with same IPC namespace as another target container.
+
+```shell
+docker rm -v ch6_ipc_consumer # remove earlier consumer
+docker -d --name ch6_ipc_consumer \
+    --ipc container:ch6_ipc_producer \ # join IPC namespace
+    dockerinaction/ch6_ipc -consumer 
+docker logs ch6_ipc_producer
+docker logs ch6_ipc_consumer
+
+# clean up volume (-v) and kill if running (-f)
+docker rm -vf ch6_ipc_producer ch6_ipc_consumer
+```
+
+Sharing memory with containers is safer than sharing with host.
+
+If we want to operate in the same namespace as the rest of the host, we can do so using open memory container. These consumers will be able to comunicate with each other and any other processes running on the host computer. This should be avoided as much as possible. Open memory containers are a risk.
+
+```shell
+docker -d --name ch6_ipc_producer \
+    --ipc host \
+    dockerinaction/ch6_ipc -producer
+docker -d --name ch6_ipc_consumer \
+    --ipc host \
+    dockerinaction/ch6_ipc -consumer
+docker rm -vf ch6_ipc_producer ch6_ipc_consumer
+```
+
+### Users in Docker
+
+Docker starts containers as the root user inside that container by default. This could be dangerous as root user has almost all access. Linux has a mechanism  namespace (USR) to map users from one namespace to another. There is currently no way to examine an image to discover attributes like default user. Once a container has been created, we can find the username that container is using:
+
+```shell
+docker create --name bob busybox:latest ping localhost
+docker inspect bob
+docker inspect bob --format "{{.Config.User}}" bob
+```
+
+If the result is blank, the container will run with root user. The metadata returned by `docker inspect` only includes the configuration that the container was started with. 
+
+```shell
+docker run --rm --entrypoint "" busybox:latest whoami
+docker run --rm --entrypoint "" buxybox:latest id # get the id and username
+# get list of all available users
+docker run --rm busybox:latest awk -F: '$0=$1' /etc/passwd
+```
+
+Once we have specific user that we want to user when running a container, we can do so using:
+
+```shell
+docker run --rm \
+    --user somebody \
+    busybox:latest id
+docker run --rm \
+    -u nobody:default \
+    busybox:latest id # use default group with specific username
+docker run --rm \
+    -u 10000:20000 \
+    busybox:latest id # use specific uid, gid instead of usernames
+```
+
+Unless you want a file to be accessible to a container, don't mount it into that container with a volume. We can also edit the image ahead of time by setting the user Id of the user we're going to run the container with.
+
+```shell
+mkdir logFiles
+sudo chown 2000:2000 logFiles # set ownership of directory to desired user and group
+docker run --rm -v "$(pwd)"/logFiles:/logFiles \
+    -u 2000:2000 ubuntu:latest \
+    /bin/bash -c "echo This is important info > /logFiles/important.log"
+docker run --rm -v "$(pwd)"/logFiles:/logFiles \
+    -u 2000:2000 ubuntu:latest \
+    /bin/bash -c "echo More info >> /logFiles/important.log"
+sudo rm -r logFiles
+```
+
+Docker can adjust the feature authorization of processes within containers. When we create a new container, Docker drops a specific set of capabilities by default. The default set of capabilities provided to Docker containers provides a resonable feature reduction. We could drop specific funtionality (for example, NET_RAW) from a container using `--cap-from` flag.
+
+```shell
+docker run --rm -u nobody \
+    ubuntu:latest \
+    /bin/bash -c "capsh --print | grep net_raw"
+docker run --rm -u nobody \
+    --cap-drop net_raw ubuntu:latest \
+    /bin/bash -c "capsh --print | grep net_raw"
+```
+
+Similarly, `--cap-add` can be used to add capabilities. These options can be specified multiple times to specify multiple capabilities. To add SYS_ADMIN capabilities:
+
+```shell
+docker run --rm -u nobody \
+    ubuntu:latest \
+    /bin/bash -c "capsh --print | grep sys_admin"
+docker run --rm -u nobody \
+    --cap-add sys_admin ubuntu:latest \
+    /bin/bash -c "capsh --print | grep sys_admin"
+```
+
+When you need to run a system administration task inside a container, you can grant that container privileged access to your computer.
+
+```shell
+docker run --rm --privileged \
+    ubuntu:latest id # check out our IDs
+docker run --rm --privileged \
+    ubuntu:latest capsh -print # Check our Linux capabilities
+docker run --rm --privileged \
+    ubuntu:latest ls /dev # Check list of mounted devices
+docker run --rm --privileged \
+    ubuntu:latest ifconfig # check network configuration
+```
+
+There are tools to enhance and harden your containers include AppArmor and SELinux. Docker has a `--security-opt` to specify Linux security modules at container creation or runtime.
+
+Docker ships with libcontainer by default but users can change the container execution provider. To use LXC, we need to install it and make sure that Docker was started with the LXC driver enabled using `--exec-driver=lxc` option. Then, we can use `--lxc-conf` flag to set the LXC configuration for a container.
+
+```shell
+docker run -d \
+    --lxc-conf="lxc.cgroup.cpuset.cpus=0,1" \
+    --name ch6_stresser dockerinaction/ch6_stresser
+docker run -it --rm dockerinaction/ch6_htop
+docker rm -vf ch6_stresser
+```
