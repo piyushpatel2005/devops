@@ -2,6 +2,30 @@
 
 Docker is command-line program, background daemon, and a set of services that take a logical approach to solving common software problems and simplifying installation, runnin, publishing and removing softwares. It is open source. Without Docker, businesses typically use hardware virtualization (virtual machines) to provide isolation. They take a long time to create and require significant resource overhead because they run a whole copy of an operating system in addition to the software you want to use. Docker containers don't use hardware virtualization. Programs inside Docker containers interface directly with the host kernel.
 
+### Installation:
+
+```shell
+sudo apt-get update
+sudo apt-get install \
+    apt-transport-https \
+    ca-certificates \
+    curl \
+    gnupg-agent \
+    software-properties-common
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+sudo apt-key fingerprint 0EBFCD88
+sudo add-apt-repository \
+   "deb [arch=amd64] https://download.docker.com/linux/ubuntu \
+   $(lsb_release -cs) \
+   stable"
+sudo apt-get update
+sudo apt-get install docker-ce docker-ce-cli containerd.io
+# Give current user permission to run docker without sudo
+sudo groupadd docker
+sudo usermod -a -G docker $USER
+docker version
+```
+
 Docker uses Linux namespaces and cgroups. The operating system is the interface between all user programs and the hardware that computer is running on. Programs running inside a container can access only their own memory and resources as scoped by the container. A **docker image** is a bundled snapshot of all the files that should be available to a program running inside a container. 
 
 `docker run dockerinaction/hello_world`

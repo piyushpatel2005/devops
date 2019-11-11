@@ -142,3 +142,173 @@ tar -tf contents.tar # Show archive contents
 ```
 
 The `docker import` command will stream the content of a tarball into a new image. 
+
+## Build automation
+
+A Dockerfile is a file that contains instructions for building an image. These are followed by Docker image builder from top to bottom and can be used to change anything about an image.
+
+```Dockerfile
+# An example Dockerfile for installing Git on Ubuntu
+FROM ubuntu:latest
+MAINTAINER "piyushpatel@gmail.com"
+RUN apt-get install -y git
+ENTRYPOINT ["git"]
+```
+
+Tag the new image with 'auto'
+```shell
+docker build --tag ubuntu-git:auto .
+docker images # Check if this image exists
+docker run --rm ubuntu-git:auto
+```
+
+If you are starting from empty repository, we can add that using repository named `scratch`. The `docker build` command starts the build process of the image with specific tag. If we have named Dockerfile with different name, we can specify which file to use in build process using `--file` or `-f` flag. Each instruction in Dockerfile triggers the creation of a new container with the specified modification. At the end of modification, the builder commits the layer and moves on to the next instruction and container is created from the fresh layer. If you want to omit the output of RUN command, we can invoke Docker build using `--quiet` or `-q` flag. 
+
+The layered structure of each instruction means that we could branch on any of these steps and Docker builder can cache the results of each step. If a problem occurs after several other steps, the builder can restart from the same position after the problem has been fixed.
+
+### Dockerfile
+
+Dockerfiles are expressive and maintaining multiple versions of an image is as simple as maintaining multiple versions of Dockerfiles. For more information on all instructions, you can refer to Docker documentation for builder.
+
+Below file builds a base image and two other images with distinct versions of the mailer program. The purpose of this program is to listen for messages on a TCP port and then send those messages to their intended recipients. The first version listen for messages and log those messages. The second will send the message as an HTTP POST to the defined URL. With Dockerfile, it is easier to copy files from local computer to Docker image. We can also define files which should not be copied into any images in a file called `.dockerignore`. When we create Dockerfile, it should be kept in mind that each Dockerfile instruction will result in a new layer being created. Instructions should be combined whenever possible because the builder won't perform any optimization.
+
+```shell
+cd example-dockerfiles/mailer
+docker build -t dockerinaction/mailer-base:0.6 -f mailer-base.df .
+```
+`FROM` sets the layer stack to start from.
+`MAINTAINER` sets the Author value in the image metadata.
+`ENTRYPOINT` sets the executable to be run at container startup. Entrypoint could be specified using shell form or exec form. A command specified using shell form would be executed as an argument to default shell. `/bin/sh -c 'exec ./mailer.sh'`. If shell form is used, then all other arguments provided by CMD instruction will be ignored.
+`ENV` sets environment variables for an image. Similar to `--env` flag for docker create.
+`LABEL` is used to define key/value pairs that are recorded as additional metadata for an image or container. It is simialr to `--label` flag on docker create.
+`WORDIR` sets the default working directory of an image. Setting WORKDIR to a location that doesn't exist will create that location.
+`EXPOSE` creates a layer that opens port 33333.
+`USER` sets the user and group for all further build steps and containers created from the image.
+
+`docker inspect dockerinaction/mailer-base:0.6` can be used to inspect an image.
+
+A Dockerfile defines three instructions to modify the file system: COPY, VOLUME and ADD. Check [mailer-logging.df](example-dockerfiles/mailer/mailer-logging.df)
+
+`COPY` will copy files from file system where the image is being built into the build container. The last argument is destination and all other arguments are source files. It's better to delay the RUN instructions to change file ownership until all the files that you need to update have been copied into the image. 
+`VOLUME` will create each value in string array as a nwe volume definition in the resulting layer. This will only create the defined location in the file system and then add a volume definition to the image metadata.
+`CMD` is related to ENTRYPOINT. Thsi represents an argument list for the entrypoint. Here, ENTRYPOINT is defined as mailer command. The argument used is the location that should be used for the log file.
+
+Create a directory `./log-impl` and create file inside it named `mailer.sh`.
+
+```shell
+#!/bin/sh
+# mailer.sh
+printf "Logging Mailer has started.\n"
+while true
+do
+    MESSAGE=$(nc -l -p 33333)
+    printf "[Message]: %s\n" "$MESSAGE" > $1
+    sleep 1
+done
+```
+
+Use following command to build the `mailer-logging` image from `example-dockerfiles/mailer` directory.
+
+```shell
+docker build -t dockerinaction/mailer-logging -f mailer-logging.df .
+# start container from this image
+docker run -d --name logging-mailer dockerinaction/mailer-logging
+```
+
+Containers that link to this mailer will have their messages logged to `/var/log/mailer.log`.
+
+`ADD` instruction will fetch remote source files if a URL is specified or extract the files of any source determined to be an archive file.
+
+Create subdirectory `live-impl` in the same folder and add `mailer.sh` file.
+
+```shell
+cd example-dockerfiles/mailer/
+docker build -t dockerinaction/mailer-live -f mailer-live.df
+docker run -d --name live-mailer dockerinaction/mailer-live
+```
+
+`ONBUILD` instruction defines instructions to execute if the resulting image is used as a base for another build.
+
+### Startup scripts
+
+Docker containers have no control over the environment where they're created. An image author can solidify the user experience of their image by introducing environment and dependency validation prior to execution of the main task. For example, Wordpress requires certain environment variables to be set or container links to be defined. WordPress images use a script as the container entrypoint. That script validates that the container context is set in a way that's compatible with the contained version of WordPress. If any required condition is unmet, then the script will exit before starting WordPress and the container will stop unexpectedly. The script should validate as much context as possible including links, aliases, environment variables, network access, network port availability, root file system mount parameters, volumes, current user, etc. At container startup, below script enforces that either another container has linked to the web alias and has exposed port 80 or the WEB_HOST environment variable has been defined.
+
+```shell
+#!/bin/bash
+set -e
+
+if [ -n "$WEB_PORT_80_TCP" ]; then
+    if [ -z "$WEB_HOST" ]; then
+        WEB_HOST='web'
+    else
+        echo >&2 '[WARN]: Linked container, "web" overridden by $WEB_HOST.'
+        echo >&2 "===> Connecting to WEB_HOST ($WEB_HOST)"
+    fi
+fi
+
+if [ -z "$WEB_HOST" ]; then
+    echo >&2 '[ERROR]: specify a linked container, "web" or WEB_HOST environment variable'
+    exit 1
+fi
+exec "$@" # run the default command
+```
+
+Init process typically use a set of files to describe the ideal state of the initialized system. These files describe what programs to start, when to start them and what actions to take when they stop.
+
+A docker container user can always override image defaults when they create a container. The best thing an image author can do are create other non-root users and establish a non-root default user and group. `USER` instruction sets the user and group in Dockerfile. We can drop high privileges in Dockerfile or with startup script before a container is created. If we drop privileges too early, the active user may not have permission to complete the instructions in a Dockerfile.
+
+```
+# UserPermissionDenied.df
+FROM busybox:latest
+USER 1000:1000
+ENTRYPOINT ["nc"]
+CMD ["-l", "-p", "80", "0.0.0.0"]
+```
+
+With above Dockerfile, if we build an image and create a container, the command will fail.
+
+```shell
+docker build \
+    -t dockerinaction/ch8_perm_denied \
+    -f UserPermissionDenied.df .
+docker run dockerinaction/ch8_perm_denied
+```
+
+Docker currently lacks support for the Linux USR namespace. This means UID 1000 in container is UID 1000 on host machine.
+There are two other aspects of hardening container, SUID and SGID. An executable file with the SUID bit set will always execute as its owner.
+For example, program like `/usr/bin/passwd` owned by root user has SUID permission set. If a non-root user like bob executes passwd, he will execute that program as the root user.
+
+```
+FROM ubuntu:latest
+# SET SUID bit on whoami
+RUN chmod u+s /usr/bin/whoami
+# Create an example user and set it as default
+RUN adduser --system --no-create-home --disabled-password --disabled-login \
+    --shell /bin/sh example
+USER example
+# Set the default to compare the container user and the effective user for whoami
+CMD printf "Container running as: %s\n" $(id -u -n) && \
+    printf "Effectively running whoami as: %s\n" $(whoami)
+```
+
+```shell
+docker build -t dockerinaction/ch8_whoami .
+docker run dockerinaction/ch8_whoami
+```
+
+The SGID works similarly. The difference is that the execution will be from the owning group's context, not user.
+
+Below command shows how many and which files have these permissions.
+
+```shell
+docker run --rm debian:wheezy find / -perm +6000 -type f
+# Find all files with SGID permission
+docker run --rm debian:wheezy find / -perm +2000 -type f
+```
+
+A bug in any of these files could be used to compromise the root account inside a container. So, either unset their SUID and SGID permissions or delete these files. The following instruction will unset the permissions on all files currently in the image.
+
+```shell
+RUN for i in $(find / -type f \( -perm +6000 -o -perm +2000 \)); \
+    do chmod ug-s $i; done
+```
