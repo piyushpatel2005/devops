@@ -312,3 +312,86 @@ A bug in any of these files could be used to compromise the root account inside 
 RUN for i in $(find / -type f \( -perm +6000 -o -perm +2000 \)); \
     do chmod ug-s $i; done
 ```
+
+## Software Distribution
+
+Hosted registries offer both public and private repositories with automated build tools. Running a private registry lets you hide and customize your image distribution infrastructure.
+
+### Choosing a distribution method
+
+Choosing the best distribution method for your needs may require you to consider cost, visibility, transport speed, availability, access control, etc. So, free registries like DockerHub may be free but we can't control access on them. Docker registries are services that make repositories accessible to Dcoker pull commands. A hosted registry is a Docker registry service that's owned and operated by third-party vendor like DockerHub, Quay.io, Tutum.co, etc.
+
+The simplest way to **publish repository** is to start with hosted registries. Once we have account, create a Dockerfile named HelloWorld.df and add following.
+
+```
+FROM busybox:latest
+CMD echo Hello World
+```
+
+Build your new image using following.
+
+```shell
+docker build -t <your-username>/hello-dockerfile \
+    -f HelloWorld.df
+# Login using following
+docker login
+docker push <your-username>/hello-dockerfile
+docker search <your-username>/hello-dockerfile
+```
+
+Hosted repositories are layer-aware and will work with Docker clients to transfer only the layers that client doesn't have. Repositories owned by an individual may be written only by that individual account. Repositories owned by organizations may be written to by any user who is part of that organization.
+
+**Automated builds** are images that are built by the registry pprovider using image sources that you've made available. Distributing your work with automated builds requires a hosted image repository and a hosted Git repository. DockerHub integrates with Github.com and Bitbucket.org for automated builds. They provide *webhook* which is a way for your Git repository to notify your image repository that a change has been made to the source. When Docker Hub receives a webhook for Git repo, it will start an automated build for Docker Hub repository.
+
+Create Git repository named `hello-docker` and make it public. Create a new file named Dockerfile and include following.
+
+```
+FROM busybox:latest
+CMD echo Hello World
+```
+
+Create Git repository. You should also set up Automated builds from the dropdown menu on DockerHub website.
+
+```shell
+git init
+git remote add origin <github repo link>
+git add Dockerfile
+git commit -m "First commit"
+git push -u origin master
+```
+
+After a while search your docker image using `docker search <your username>/hello-docker`
+
+**Private repositories** are similar to public. Individuals and small teams will find the most utility in private hosted repositories. Large companies that need a higher degere of secrecy and have a suitable budget may find their needs better met by running their own private registry.
+
+### Private registries
+
+Private repositories provide better control and secercy. People can interact with a private registry exactly as they would with a hosted registry. The distribution software for Docker registry is available on Docker Hub. Staring a local repository in a container can be done with a single command.
+
+```shell
+docker run -d -p 5000:5000 \
+    -v "$(pwd)"/data:/tmp/registry-dev \
+    --restart=always --name local-registry registry:2
+```
+
+This image is configured for insecure access from machine running a client's Docker daemon. In this case, registry location is `localhost:5000`. To see workflow of copying images from Docker Hub into your new registry:
+
+```shell
+docker pull dockerinaction/ch9_registry_bound
+# Verify image is discovered with label filter
+docker images -f "label=dia_excercise=ch9_registry_bound"
+# Push demo image into your private registry
+docker tag dockerinaction/ch9_registry_bound \
+    localhost:5000/dockerinaction/ch9_registry_bound
+# remove existing tagged reference
+docker rmi dockerinaction/ch9_registry_bound \
+    localhost:5000/dockerinaction/ch9_registry_bound
+docker images -f "label=dia_excercise=ch9_registry_bound"
+docker pull localhost:5000/dockerinaction/ch9_registry_bound
+# Image is back now, verify
+docker images -f "label=dia_excercise=ch9_registry_bound"
+docker rm -vf local-registry # Cleanup local repository
+```
+
+## Customized Registries
+
