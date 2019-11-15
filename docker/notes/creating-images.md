@@ -395,3 +395,49 @@ docker rm -vf local-registry # Cleanup local repository
 
 ## Customized Registries
 
+A company may run one or more centralized registries that are backed by durable artifact storage.
+
+### Personal registry
+
+For a personal registry, pull the image and launch a personal registry to start.
+
+```shell
+docker run -d --name personal_ergistry \
+    -p 5000:5000 --restart=always \
+    registry:2
+```
+
+The distribution project runs on port 5000, but clients make no assumptions about locations and attempt connecting to port 80 by default. We could map port 80 on host to port 5000 on the container, but we map port 5000 directly. Anytime you connect to the registry, you'll need to explicitly state the port where the registry is running. The container you started from the registry image will store the repository data that you send to it in a managed volume mounted at `/var/lib/registry`. 
+
+```shell
+docker tag registry:2 localhost:5000/distribution:2
+docker push localhost:5000/distribution:2
+```
+
+The `push` command will output a line for each image layer that's uploaded to the registry and finally output the digest of the image.
+
+The V2 Registry API is RESTful. Create `curl.df` file.
+
+```
+FROM gliderlabs/alpine:latest
+LABEL source=dockerinaction
+LABEL category=utility
+RUN apk --update add curl
+ENTRYPOINT ["curl"]
+CMD ["--help"]
+```
+
+Build docker image using `docker build -t dockerinaction/curl -f curl.df .`. With this image, we can issue the curl commands in the examples without worrying about whether curl is installed or what version is installed on host computer.
+
+```shell
+docker run --rm --net host dockerinaction/curl -Is
+    http://localhost:5000/v2/
+```
+
+Below command will retrieve the list of tags in the distribution repository on your registry.
+
+```shell
+docker run --rm -u 1000:1000 --net host \
+    dockerinaction/curl -s http://localhost:5000/v2/distribution/tags/list
+```
+195
