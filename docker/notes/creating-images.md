@@ -440,4 +440,236 @@ Below command will retrieve the list of tags in the distribution repository on y
 docker run --rm -u 1000:1000 --net host \
     dockerinaction/curl -s http://localhost:5000/v2/distribution/tags/list
 ```
-195
+
+The base image for registry is Debian and it has been updated dependencies. The main program is named registry and is available on the PATH. The default configuration file is config.yml. 
+
+The configuration file contains nine top-level sections. 
+- `version`: This is required field and specifies the configuration version.
+- `log`: This controls the logging output produced by the Distribution project.
+- `storage`: This controls where and how images are stored and maintained.
+- `auth`: This controls in-registry authentication mechanisms
+- `middleware`: It is optional and is used to configure the storage, registry or repository middleware in use.
+- `reporting`: This section confiures reporting tools such as ugsnag or NewRelic.
+- `http`: This specifies how distribution should make itself available on the network.
+- `notifications`: Webhook-style integration with other projects is configured in the notifications section.
+- `redis`: Configuration for a Redis cache is provided in this section.
+
+### Enhancements for centralized registries
+
+When more than one person needs access to the same registry it is called a centralized registry. For more than one person to access the registry, it will need to be available on network. This could be accomplished easily by mapping the registry container to port 80 on the network interface of computer it's running on. Once clients can access the registry, you'll want to make sure that only the right users can access it using authentication. Supporting multiple client versions can be managed through adding a proxy to the system. Reverse proxy configuration will involve two containers. The first will run Nginx reverse proxy. The second will run registry. The reverse proxy container will be linked to the registry container on the host alias, `registry`. Create new file `basic=proxy.conf` and include below.
+
+```
+upstream docker-registry { # from basic-proxy.conf
+    server registry:5000;
+}
+
+server {
+    listen 80; # container port
+    # Use localhost name for testing purposes
+    server_name localhost;
+    # A real deployment would use the real hostname where it is deployed
+    # server_name mytotallyawesomeregistry.com;
+    client_max_boxy_size 0;
+    chunked_transfer_encoding on;
+
+    # We're going to forward all traffic bound for the registry
+    location /v2/ { # /v2/ prefix
+        proxy_pass http://docker-registry; # Resolves the upstream
+        proxy_set_header Host               $http_host;
+        proxy_set_header X-Real-IP          $remote_addr;
+        proxy_set_header X-Forwarded-For    $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto  $scheme;
+        proxy_read_timeout                  900;
+    }
+}
+```
+
+This configuration will forward all traffic on port 80 for the HTTP host localhost and with the path prefix `/v2/` on to `http://registry:5000`. This configuration will be the base for other modifications you make to your reverse proxy. Once reverse proxy is configured, you'll want to build a new image. Create a new file `basic-proxy.df` and paste following Dockerfile.
+
+```
+FROM nginx:latest
+LABEL source=dockerinaction
+LABEL category=infrastructure
+COPY ./basic-proxy.conf /etc/nginx/conf.d/default.conf
+```
+
+Now, build an image using `docker build -t dockerinaction/basic_proxy -f basic-proxy.df .`.  The following commands will create new reverse proxy and test the connection.
+
+```shell
+docker run -d --name basic_proxy -p 80:80 \ # start reverse proxy
+    --link personal_registry:registry \ # link to registry
+    dockerinaction/basic_proxy
+docker run --rm -u 1000:1000 --net host \
+    dockerinaction/curl \ # Run curl to query your registry through the proxy
+    -s http://localhost:80/v2/distribution/tags/list
+```
+
+Earlier `personal_registry` container has exposed port 5000. With the first command, reverse proxy container is linked to your registry. Any traffic that the proxy receives on port 80 will be forwarded to port 5000 on registry container.
+
+Using TLS to **secure your registry** is best practice. The Docker daemon won't connect to a registry without TLS unless that registry is running on localhost. An HTTPS endpoint is different from HTTP in that it should listen on TCP port 443. It requires signed certificate and private key files. Last, the host name of the server and the proxy configuration must match the one used to create the certificate. First thing we should create SSH keys and a self-signed certificate. With Docker public image by CenturyLink, we can get this done using
+
+```shell
+docker run --rm -e COMMON_NAME=localhost -e KEY_NAME=localhost \
+    -v "$(pwd)":/certs centurylink/openssl
+```
+
+Above command generates a 4096-bit RSA key pair and store the private key file and self-signed certificate in current working directory.
+
+Next, create proxy configuration file. Create file named `tls-proxy.conf` and copy following.
+
+```
+upstream docker-registry {
+    server registry:5000;
+}
+
+server {
+    listen 443 ssl; # listen on port 443
+    server_name localhost
+
+    client_max_body_size 0;
+    chunked_transfer_encoding on;
+
+    ssl_certificate /etc/nginx/conf.d/localhost.crt; # registration of SSL certificate
+    ssl_certificate_key /etc/nginx/conf.d/localhost.key; # registration of SSL certificate key
+
+    location /v2/ {
+        proxy_pass                          http://docker-registry;
+        proxy_set_header Host               $http_host;
+        proxy_set_header X-Real-IP          $remote_addr;
+        proxy_set_header X-Forwarded-For    $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto  $scheme;
+        proxy_read_timeout                  900;
+    }
+}
+```
+
+Above proxy configuration uses the same registry on port 5000. Now create a Dockerfile to copy proxy configuration and certificate and key into image.
+
+```
+FOM nginx:latest
+LABEL source=dockerinaction
+LABEL category=infrastructure
+COPY ["./tls-proxy.conf",
+        "./localhost.crt",
+        "./localhost.key",
+        "/etc/nginx/conf.d/"
+    ]
+```
+
+```shell
+# Build new image using 
+docker build -t dockerinaction/tls_proxy -f tls-proxy.df .
+# Start proxy and test using curl
+docker run -d --name tls-proxy -p 443:443 \
+    --link personal_registry:registry \
+    dockerinaction/tls_proxy
+docker run --rm --net host \
+    dockerinaction/curl -ks \ # -k option ignores any certificate error with the request endpoint
+    http://localhost:443/v2/distribution/tags/list
+```
+
+There are three mechanisms for **authentication** with Docker project. These are silly, token and htpasswd. We can also configure various authentication mechanisms in the reverse proxy layer. The silly method is insecure and is only for development purpose.
+
+The second, token, uses JSON web token (JWT). Using this method requires that you deploy a separate authentication service. Until JWT matures, the best option is htpasswd. htpasswd is named for a program that ships with Apache web server utilities. htpasswd is used to generate encoded username and password pairs where the password has been encrypted with bcrypt algorithm. This authentication should be used in tandem with HTTPS. It can be added at reverse proxy layer or on the registry. We need to create password file with htpasswd. htpasswd needs to be installed using Docker. Create `htpasswd.df` file as below.
+
+
+```
+# htpasswd.df
+FROM debian:jessie
+LABEL source=dockerinaction
+LABEL category=utility
+RUN apt-get update && apt-get install -y apache2-utils
+ENTRYPOINT ["htpasswd"]
+```
+
+```shell
+docker build -t htpasswd -f htpasswd.df .
+# Create entry for a password as below.
+docker run -it --rm htpasswd -nB <username>
+```
+
+Above commands will prompt for password twice and then generate the password file entry. Copy the result with encrypted string into a file named `registry.password`. To implement Basic authentication in NGINX by adding two lines to configuration file. Create file `tls-auth-proxy.conf` and add following.
+
+```
+# filename: tls-auth-proxy.conf
+upstream docker-registry {
+    servere registry:5000;
+}
+
+server {
+    listen 443 ssl;
+    server_name localhost
+
+    client_max_body_size 0;
+    chunked_transfer_encoding on;
+
+    # SSL
+    ssl_certificate /etc/nginx/conf.d/localhost.crt;
+    ssl_certificate /etc/nginx/conf.d/localhost.key;
+
+    location /v2/ {
+        auth_basic "registry.localhost"; # Authentication realm
+        auth_basic_user_file /etc/nginx/conf.d/registry.password; # password file
+
+        proxy_pass                                              http://docker-registry;
+        proxy_set_header Host                                   $http_host;
+        proxy_set_header X-Real-IP                              $remote_addr;
+        proxy_set_header X-Forwarded-For                        $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto                      $scheme;
+        proxy_read_timeout                                      900; 
+    }
+}
+```
+
+Create Dockerfile named `tls-auth-proxy.df`
+
+```
+FROM nginx:latest
+LABEL source=dockerinaction
+LABEL category=infrastructure
+COPY ["./tls-auth-proxy.conf",
+        "./localhost.crt", "./localhost.key", "./registry.password", "/etc/nginx/conf.d/"
+    ]
+```
+
+We can also enable HTTPS. In production, it's more suitable to terminate the TLS connection at the proxy layer. The following configuration file `tls-auth-registry.yml` adds TLS and HTTP basic authentication to default Distribution container.
+
+```yaml
+version: 0.1
+log:
+    level: debug
+    fields:
+        service: registry
+        environment: development
+storage:
+    filesystem:
+        rootdirectory: /var/lib/registry
+    cache:
+        layerinfo: inmemory
+    maintenance:
+        uploadpurging:
+            enabled: false
+http:
+    addr: 5000
+    secret: asecretforlocaldevelopment
+    tls:
+        certificate: /localhost.crt
+        key: /localhost.key
+    debug:
+        addr: localhost:5001
+auth: 
+    htpasswd:
+        realm: registry.localhost
+        path: /registry.password
+```
+
+The `tls` section uses two files. We need to copy the files into the image or use volumes. Create [tls-auth-registry.df](example-dockerfiles/registry/tls-auth-registry.df) file. After that build and launch the new registry.
+
+```shell
+docker build -t dockerinaction/secure_registry -f tls-auth-registry.df .
+docker run -d --name secure_registry \
+    -p 5443:5000 --restrat=always \
+    dockerinaction/secure_registry
+```
+
+
