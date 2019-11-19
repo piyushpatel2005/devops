@@ -1,0 +1,11 @@
+wordpress: # define service named wordpress
+  image: wordpress:4.2.2 # uses wordpress:4.2.2 image
+  links:
+    - db:mysql # models link dependency on db service
+  ports: 
+    - 8080:80 # maps port 80 on container to port 8080 on host
+
+db: # defines service named db
+  image: mariadb # uses mariadb:latest image
+  environment:
+    MYSQL_ROOT_PASSWORD: example # sets administrative database password through environment variable
