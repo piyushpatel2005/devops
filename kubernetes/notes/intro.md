@@ -48,3 +48,13 @@ When you tell Kubernetes to run your application, you're letting it choose the m
 Kubernetes monitors your app components and the nodes they run on and automatically reschedules them to other nodes in the event of a node failure. If your infrastructure has enough spare resources to allow normal system operation even without the failed node, the ops team doesn't even need to react to the failure immediately.
 
 Kubernetes can also **auto scale** to keep adjusting the number of running instances of each application. If Kubernetes is running in cluster, it can automatically scale the whole cluster size based on the needs of the deployed applications.
+
+## Docker and Kubernetes
+
+For these steps, install Docker by following instructions on Docker website.
+
+```shell
+docker run busybox echo "Hello World"
+```
+
+Create simple app which will print server hostname. 
