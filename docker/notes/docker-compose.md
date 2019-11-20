@@ -141,3 +141,91 @@ dbstate:
 ```
 
 The data service only defines sensible defaults for a volume container. The dbstate service uses `extends` key to specify that it extends data service. It needs to specify both the file and service name being extended. The child is a new container built from the freshly generated layer. the `volumes` key accepts a list of volume specifications allows by the `docker run -v` flag. Docker compose can be used for forensic and automated testing.
+
+## Docker Machine and Swarm
+
+Docket Machine and Docker Swarm help system administrators and infrastructure engineers extend those abstractions into clustered environments.
+
+### Docker Machine
+
+Docker Machine can create and tear down whole fleets of Docker enabled hosts in a matter of seconds. It ships with a number of drivers and each driver integrates Docker Machine with a different virtual machine technology or cloud-based virtual computing provider. If you use a cloud provider for these services, you'll need to configure environment with provider-specific information as well as  driver-specific flags in any commands. We can get driver-specific flags by `docker machine help create` command.
+
+```shell
+docker-machine help
+# Create three virtual machines
+docker-machine create --driver virtualbox host1
+docker-machine create --driver virtualbox host2
+docker-machine create --driver virtualbox host3
+```
+
+Docker Machine tracks these machines with a set of files in `~/.docker/machine/`. They describe hosts you've created. Docker Machine can be used to list, inspect and upgrade.
+
+```shell
+docker-machine ls
+docker-machine inspect host1 # JSON document describing the machine
+docker-machine inspect --format "{{.Driver.IPAddress}}" host1 # only IP address
+docker-machine upgrade host3 # upgrade managed machine host3
+```
+
+When you create or register a machine with Docker Machine, it creates or imports an SSH private key file. That private key can be used to authenticate as a privileged user on the machine over SSH. The `docker-machine ssh` will authenticate with target machine and bind terminal to a shell on the machine.
+
+```shell
+docker-machine ssh host1 # ssh to host1 machine
+touch sample
+exit # exit from host1
+```
+
+The same can be done using `docker-machine ssh host1 "echo spot > sample"`
+
+```shell
+docker-machine scp host1:sample host2:sample
+docker-machine ssh host2 "cat sample"
+```
+
+```shell
+docker-machine stop host2
+docker-machine kill host3
+docker-machine start host2
+docker-machine rm host1 host2 host3
+```
+
+Docker Machine accounts for and tracks the state of the machines it manages. Docker Machine is used to produce environment configuration for an active Docker host.
+
+```shell
+docker-machine create --driver virtualbox machine1
+docker-machine create --driver virtualbox machine2
+docker machine env machine1 # Let env autodetect your shell environment
+docker-machine env --shell powershell machine1 # get PowerShell configuration (specified using shell flag)
+docker-machine env --shell cmd machine1 # get CMD configuration
+docker-machine env --shell bash machine1 # get dfeault configuration (POSIX)
+```
+
+To set machine1 as active machine, execute `eval "$(docker-machine env machine1)"`. If you use Windows and run PowerShell, you can run as `docker-machine env --shell=powershell machine1 | Invoke-Expresssion`. We can see whether a machine is active or not using `docker-machine active`.
+
+### Docker Swarm
+
+It used to be the case where we used to deploy different pieces of software to different machines. A Swarm cluster is made up of two types of machines. A machine running Swarm in management mode is called a manager. A machine that runs a Swarm agent is called a node. These programs need no special installation or privileged access to the machines. They run in Docker containers. Docker Machine can provision Swarm clusters as easily as standalone Docker machines. The `--swarm` flag indicates that the machine being reated should run the Swarm agent software and join a cluster. The `--swarm-master` will instruct Docker Machine to configure new machine as a Swarm manager. The `--swarm-discovery` takes an additional argument that specifies the unique ID of the cluster which is used to identify the cluster a machine is joining.
+
+Docker Swarm agent on each node communicates with a Swarm discovery subsystem to advertise its membership in a cluster identified by `token://12341234`. Single machine running the Swarm manager polls the Swarm discovery subsystem for an updated list of nodes in the cluster.
+
+To create your own Swarm cluster, first create a cluster identifier. By default, Swarm uses a free and hosted solution provided on Docker Hub.
+
+```shell
+# Create a new cluster identifier
+docker-machine create --driver virtualbox local
+eval "$(docker-machine env local)" 
+docker run --rm swarm create
+# Copy the resulting value and substitute for <TOKEN> in the next three commands.
+# Create a three-node Swarm cluster using virtual machines
+# --swarm-master parameter to indicate that the machine being create should manage the new Swarm cluster
+docker-machin create --driver virtualbox \
+    --swarm --swarm-discovery token://<TOKEN> \
+    --swarm-master machine0-manager
+docker-machine create --driver virtualbox \
+    --swarm --swarm-discovery token://<TOKEN> \
+    machine1
+docker-machine create --driver virtualbox \
+    --swarm --swarm-discovery token://<TOKEN> \
+    machine2
+docker-machine ls
+```
