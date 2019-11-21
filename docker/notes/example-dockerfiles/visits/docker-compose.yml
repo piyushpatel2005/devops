@@ -1,0 +1,14 @@
+version: '2'
+# Create these parts
+services:
+  # Make redis-server container using redis image
+  redis-server:
+    image: 'redis'
+  # Create node-app service using Dockerfile in current directory
+  node-app:
+    build: .
+    restart: "on-failure"
+    ports:
+      # dash (-) specifies that it is an array, it means it can be more than one port number
+      # The first one is host machine port and second container port
+      - "4041:8081"
