@@ -58,3 +58,32 @@ docker run busybox echo "Hello World"
 ```
 
 Create simple app which will print server hostname. 
+
+```shell
+cd ../examples/first-app;
+docker build -t kubia .
+docker images
+docker run --name kubia-container -p 8080:8080 -d kubia
+curl localhost:8080
+docker ps # list running containers
+docker inspect kubia-container
+docker stop kubia-container
+docker ps -a
+docker rm kubia-container
+```
+
+When we run `docker build`, all the files in that directory are uploaded to the daemon. Don't include any unnecessary files in the build directory because it may take longer to upload those files especially if Docker daemon is no a remote machine. Open `http://localhost:8080/` to see hostname of the Docker container. We can also look up hostname or IP of the VM running the daemon using DOCKER_HOST environment variable.
+
+```shell
+docker tag kubia <username>/kubia
+docker images
+docker push <username>/kubia
+```
+
+A proper Kubernetes installation spans multiple physical aor virtual machines and requires the networking to be set up propertly so that containers running inside the Kubernetes cluster can connect to each other through the same flat networking space. Kubernetes can be run on local machine, cluster of machiens or on cloud services. Another option covers installing a cluster with `kubeadm` tool.
+
+The simplest and quickest path to a fully functioning Kubernetes cluster is by using Minikube. Minikube is a tool that sets up a single node cluster locally. Install Minikube using its instructions on repository. To interact with Kubernetes, also need the `kubectl` CLI client.
+
+```shell
+# Start minikube
+minikube start
