@@ -144,3 +144,5 @@ ls /app # it's mounted to the same location
 ```
 
 Earlier in the history, it started with `chroot` command which changes root.
+
+[Creating automated deployments using Travis](examples/frontend/automated-ci.md)
