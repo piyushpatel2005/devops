@@ -40,3 +40,12 @@ At the end, we can test using:
 ```shell
 docker bulid .
 docker run -p 8080:80 <image_id>
+```
+
+Create Git repository and set up code with Dockerfile on Git repository.
+Now create an account on TravisCI. Travis can lookup code changes in Github repository and Travis will run tests and once tests pass Travis can deploy to AWS.
+
+To instruct Travis, we need to use Travis YAML (`.travis.yml`) file. 
+Create Docker environment using Amazon Elastic Beanstalk.
+To deploy our app once tests pass on Travis , we have to add another section `deploy` to travis file. 
+Search for IAM, click User, Add User and make a user `docker-reac-travis-ci`, provide programmatic access. Click Next, Attach Existing policies directly and grant full access to AWS Elastic Beanstalk, Review and Create user. Write down Access Key ID and Secreat Access Key. In Travis-CI website, find repos and create Environment variables for AWS (AWS_ACCESS_KEY and AWS_SECRET_KEY)
