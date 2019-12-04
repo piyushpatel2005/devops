@@ -88,4 +88,79 @@ The simplest and quickest path to a fully functioning Kubernetes cluster is by u
 # Start minikube
 minikube start
 kubectl version
+# verify cluster is working
+kubectl cluster-info
+# list all nodes in cluster
+kubectl get nodes
+# get details about a node
+kubectl describe node <node_name>
+# get description of all nodes
+kubectl describe node # without explicit name of node
+```
+
+To work easily with kubernetes, we can set alias for kubectl using `alias k=kubectl` in `~/.bashrc` file. To enable auto completion using TAB character, we need to add following to `.bashrc` file.
+
+```shell
+source <(kubectl completion bash)
+# to enable auto completion for even alias use following
+source <(kubectl completion bash | sed s/kubectl/k/g)
+```
+
+Usually to deploy an app on Kubernetes, a JSON or YAML manifest file is created which contains description of all components you want to deploy.
+
+```shell
+kubectl run kubia --image=piyushpatel2005/kubia --port=8080 --generator=run/v1
+```
+
+Here, `--image` specifies the image you want to run, `--port` tells kubernetes that app is listening on port 8080.
+
+Kubernetes doesn't deal with individual containers directly. It uses the concept of multiple co-located containers, called **pod**. A pod is a group of one or more tighly related containers that will always run together on the same worker node and in the same Linux namespaces. Each pod is like a separate logical machine with its own IP, hostname, processes running a single application. All containers in a pod will appear to be running on the same logical machine. One pod may contain more than one containers and each worker node can run more than one pod.
+
+```shell
+# list pods
+kubectl get pods
+# describe pod with its information
+kubectl describe pod <pod_name>
+```
+
+Each pod gets unique IP address but that is internal to the cluster and isn't accessible from outside. To make pod accessible from outside, we need to expose it through a Service object. In earlier versions, we could expose ReplicationController using
+
+```shell
+kubectl expose rc kubia --type=LoadBalancer --name kubia-http
+# OR in newer versions it is replica set and deployments, try
+kubectl get deployments
+# If you see kubia here, then try following
+kubectl expose deployment kubia --type=LoadBalancer --name kubia-http
+# list whether the service is created with external ip address
+kubectl get services
+# We can also use shortcut names
+kubectl get svc
+# If running minikube cluster, use
+minikube service kubia-http
+```
+
+Once Load Balancer service kubia-http is assigned external IP address, we can use `<IPADDrESS>:8080` to access the web app. Here we declaratively tell kubernetes to expose the deployment and it does it.
+
+A pod may disappear at any time for any reason (node may fail or someone deleted the pod). Then new pod is automatically created. This pod gets a new IP address. When a service is created, it gets a static IP address which never changes during the lifetime of the service. Instead of connecting to pods directly clients should connect to the service through its constant IP address. Requests to IP and port of the service will be forwarded to the IP and port of one of the pods belonging to the servie at that moment.
+
+### Scaling application
+
+Try how many replicas have been created using following and scale up
+
+```shell
+kubectl get replicationcontrollers
+kubectl get deployments
+kubectl scale rc kubia --replicas=3
+kubectl scale deployment kubia --replicas=3
+# check how many deployments appear
+kubectl get deployments
+kubectl get pods
+# get deailed information on all pods
+kubectl get pods -o wide
+# check dashboard with minikube
+minikube dashboard
+# In production cluster, use
+kubectl cluster-info | grep dashboard
+# Stop minikube cluster
+minikube stop
 ```
