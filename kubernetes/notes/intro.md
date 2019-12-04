@@ -87,3 +87,5 @@ The simplest and quickest path to a fully functioning Kubernetes cluster is by u
 ```shell
 # Start minikube
 minikube start
+kubectl version
+```
