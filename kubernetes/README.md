@@ -1,3 +1,3 @@
 # Kubernetes
 
-[Kubernetes notes]()
+[Kubernetes notes](notes/intro.md)

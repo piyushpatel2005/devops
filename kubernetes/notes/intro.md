@@ -51,6 +51,20 @@ Kubernetes can also **auto scale** to keep adjusting the number of running insta
 
 ## Docker and Kubernetes
 
+Containers and Kubernetes encourage developers to build distributed systems that adhere to the principles of immutable infrastructure. In an immutable system, rather than a series of incremental updates and changes, an entirely new, complete image is built where the update simply replaces the entire image with newer in a single operation. This way old image is still there and if something goes wrong, we can easily rollback. It uses declarative configuration. In an declartive configuration you define state where as in imperative configuration, we define set of actions. Following are the features and advantages of Kubernetes.
+
+- Declarative configuration
+- Immutable
+- Decoupled application architecture
+- Easy scaling for applications and clusters
+- Separation of concerns for consistency and scaling
+
+Kubernetes has numerous abstractions and APIS to make services decoupled.
+- Pods or groups of containers can group together container images developed by different teams into a single deployable unit.
+- Services provide load balancing, nameing and discovery to isolate one microservice from another.
+- Namespaces provide isolation and access control so that each microservice control the degree to which other services interact with it.
+- Ingress objects provide an easy to use frontend that can comibine multiple microservices into a single externalized API surface area.
+
 For these steps, install Docker by following instructions on Docker website.
 
 ```shell
@@ -163,4 +177,87 @@ minikube dashboard
 kubectl cluster-info | grep dashboard
 # Stop minikube cluster
 minikube stop
+# Remove cluster
+minikube delete
 ```
+
+kubectl is the tool for interacting with the Kubernetes API.
+
+```shell
+# get client and server API version
+kubectl version
+# get a simple diagnostic for the cluster
+# displays components that make up the kubernetes cluster
+kubectl get componentstatuses
+```
+
+The controller-manager is responsible for running various controllers that regulate behavior in the cluster, ensuring that all replicas of a service are available and healthy. The scheduler is responsible for placing different pods onto different nodes in the cluster. Finally the etcd server is the storage for the cluster where all of the API objects are stored.
+
+```shell
+# list nodes in cluster
+kubectl get nodes
+# describe more information about a specific node such as node-1
+kubectl describe nodes node-1
+```
+
+## Kubernetes Components
+
+Kubernetes components are also deployed using Kubernetes. All these components run in the kube-system namespace.
+
+**Kubernetes proxy** is responsible for routing network traffic to load-balanced services in the Kubernetes cluster. For this, proxy must be present on every node in the cluster. If cluster runs the Kubernetes proxy with a DaemonSet, we can see the proxies by using `kubectl get daemonSets --namespace=kube-system kube-proxy`.
+
+Kubernetes runs a **DNS server** which provides naming and discovery for the services that are defined in the cluster. This DNS server runs as a replicated service on the cluster. DNS service is run as a Kubernetes deployment which manages its replicas. There is also kubernetes service that performs load balancing for DNS server.
+
+```shell
+kubectl get deployments --namespace=kube-system core-dns
+kubectl get services --namespace=kube-system core-dns
+```
+
+**Kubernetes UI** is GUI that run as a single replica but is managed by a Kubernetes deployment for reliability and upgrades.
+
+```shell
+kubectl get deployments --namespace=kube-system kubernetes-dashboard
+# Dashboard also has a service that performs load balancing
+kubectl get services --namespace=kube-system kubernetes-dashboard
+# To access this UI, use kubectl proxy
+kubectl proxy
+```
+
+## Kubernetes Commands
+
+Kubernetes uses **namespaces** to organize objects in the cluster. By default, the `kubectl` command interacts with the default namespace. To use specific namespace, you can pass the `--namespace` flag. If you want to change the default namespace more permanently, you can use a context. This gets recorded in the kubectl configuration file usually located in `$HOME/.kube/config`. This configuration also stores how to find and authenticate to your cluster.
+
+```shell
+# create a context with a different default namespace
+kubectl config set-context my-context --namespace=mystuff
+# To use this newly create context
+kubectl config use-context my-context
+```
+
+Contexts can also be used to manage different clusters or different users for authenticating to clusters using `--users` or `--clusters` flag with `set-context`.
+
+The most basic command for viewing kubernetes objects is `get`. If you run `kubectl get <resource-name>` you will get a listing all resources in current namespace. If you want to get a specific resource, you can use `kubectl get <resource-name> <obj-name>`. To get more information use `-o wide` flag. To view complete object, view the objects as JSON or YAML, use `-o json` or `-o yaml` flags. If we use `--no-headers` flag, `kubectl` will skip the headers at the top of table. kubectl uses the JSONPath query language to select fields in the returned object. For example, to get IP address of the specified Pod, use `kubectl get pods my-pod -o jsonpath --template={.status.podIP}`. To get more detailed information about a particular object ,use `kubectl describe <resource-name> <obj-name>`.
+
+Objects in Kubernetes API are represented as JSON or YAML files. These YAML or JSON files can be used to create, update or delete objects on Kubernetes server. You can use kubectl to create object by running `kubectl apply -f obj.yaml`. Similarly, after making changes to the object, you can use same command to update the object. The apply tool will only modify objects that are different from the current objects in the cluster. You can use `--dry-run` to print the objects to the terminal without actually sending them to the server. To make interactive edits use `kubectl edit <resource-name> <obj-name>`
+
+The apply command also records the history of previous configurations in an annotation within the object. To show the last state that was applied to the object, use `kubectl apply -f myobj.yaml view-last-applied`.
+
+To delete an object, use `kubectl delete -f obj.yaml`.
+Similarly, you can delete an object using `kubectl delete <resource-name> <obj-name>`.
+
+**Labels and annotations** are tags for objects. For example, to add the `color=red` label to a Pod named bar, use `kubectl label pods bar color=red`. By default, label and annotate will not let you overwrite an existing label. To do this, you can use `--overwrite` flag.
+
+To remove a label, use `<label-name>-` like `kubectl label pods bar color-`. `annotate` command is similar to `label` command.
+
+To view logs for a running container, use `kubectl logs <pod-name>`.
+If you have multiple containers in Pod, you can choose the container to view using the `-c` flag. To continuously stream the logs back to the terminal without exiting, you can add `-f` flag.
+
+To execute a command in a running container use `kubectl exec -it <pod-name> -- bash`. This will open interactive shell inside the running container for debugging.
+You can attach to the running process using `kubectl attach -it <pod-name>`. This will attach to the running process.
+You can also copy files from and to a container using cp command `kubectl cp <pod-name>:</path/to/file> </path/to/local/file>`. This will copy a file from running container to local machine.
+
+If you want to access your Pod via network, you can use the `port-forward` command to forward network traffic from local machine to the pod. This securely tunnels network traffic through to containers that might not be exposed anywhere on public network.
+
+`kubectl port-forward <pod-name> 8080:80` forwards traffic from the local machien on port 8080 to remote container on port 80. We can use `port-forward` with services by specifying `services/<service-name>` instead of `<pod-name>`.
+
+To see resources usage, you can use `kubectl top nodes` or `kubectl top pods`. By default, these will display total CPU and memory in current namespace. You can add `--all-namespaces` to see resource usage by all Pods in the cluster.
