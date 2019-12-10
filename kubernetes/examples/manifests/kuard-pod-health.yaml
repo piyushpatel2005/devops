@@ -1,0 +1,23 @@
+# This is example manifest file for creating Pod
+# This also ensures that the app is running
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kuard
+spec:
+  containers:
+    - image: gcr.io/kuar-demo/kuard-amd64:blue
+    name: kuard
+    livenessProbe:
+      httpGet: # for success status code must be equal to or greater than 200 and less than 400
+        path: /helathy
+        port: 8080
+      initialDelaySeconds: 5 # first call after 5 seconds of when all Pods are created
+      timoutSeconds: 1 
+      periodSeconds: 10 # call the probe every 10 secons
+      failureThreshold: 3 # if more than 3 failures, the container will fail and restart
+    ports:
+      - containerPort: 8080
+      name: http
+      protocol: TCP
+  

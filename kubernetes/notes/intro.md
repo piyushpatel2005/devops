@@ -261,3 +261,4 @@ If you want to access your Pod via network, you can use the `port-forward` comma
 `kubectl port-forward <pod-name> 8080:80` forwards traffic from the local machien on port 8080 to remote container on port 80. We can use `port-forward` with services by specifying `services/<service-name>` instead of `<pod-name>`.
 
 To see resources usage, you can use `kubectl top nodes` or `kubectl top pods`. By default, these will display total CPU and memory in current namespace. You can add `--all-namespaces` to see resource usage by all Pods in the cluster.
+
