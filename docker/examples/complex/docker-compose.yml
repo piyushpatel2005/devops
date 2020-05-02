@@ -1,0 +1,49 @@
+version: '2'
+services:
+  postgres: # name of service, chosen by dev
+    image: 'postgres:9.6' # image to be used
+  redis: 
+    image: 'redis:latest'
+  nginx:
+    restart: always
+    build:
+      dockerfile: Dockerfile.dev
+      context: ./nginx
+    ports:
+      - '3050:80' # expose port 80 from container to port 3050
+  api:
+    build:
+      dockerfile: Dockerfile.dev # When specifying dockerfile, we only specify file name.
+      # location of file is specified using context property
+      context: ./server
+    volumes:
+      - /app/node_modules # leave this folder as is inside container
+      - ./server:/app # mount everything inside `./server` and mount to `/app` directory, so it will look into ./server location on Host. So, source code doesn't need to be rebuilt
+    environment: 
+      # setup environment variables as key-value pairs
+      - REDIS_HOST=redis 
+      - REDIS_PORT=6379
+      - PGUSER=postgres
+      - PGHOST=postgres # refers to service defined for this
+      - PGDATABASE=postgres
+      - PGPASSWORD=mysecretpassword
+      - PGPORT=5432
+      - POSTGRES_HOST_AUTH_METHOD=trust
+  client:
+    build:
+      dockerfile: Dockerfile.dev
+      context: ./client
+    volumes:
+      - /app/node_modules
+      - ./client:/app
+  worker:
+    build:
+      dockerfile: Dockerfile.dev
+      context: ./worker
+    volumes:
+      - /app/node_modules
+      - ./worker:/app
+    environment: 
+      # setup environment variables as key-value pairs
+      - REDIS_HOST=redis 
+      - REDIS_PORT=6379
