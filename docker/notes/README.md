@@ -2,8 +2,10 @@
 
 These are notes from Docker in Action  book
 
-1. [Docker intro](intro.md)
+[Container Concepts](containers.md)
 
-2. [Creating Docker Images](creating-images.md)
+[Docker intro](intro.md)
 
-3. [Creating environments with Docker compose](docker-compose.md)
+[Creating Docker Images](creating-images.md)
+
+[Creating environments with Docker compose](docker-compose.md)

@@ -48,6 +48,6 @@ Now create an account on TravisCI. Travis can lookup code changes in Github repo
 To instruct Travis, we need to use Travis YAML (`.travis.yml`) file. 
 Create Docker environment using Amazon Elastic Beanstalk.
 To deploy our app once tests pass on Travis , we have to add another section `deploy` to travis file. 
-Search for IAM, click User, Add User and make a user `docker-reac-travis-ci`, provide programmatic access. Click Next, Attach Existing policies directly and grant full access to AWS Elastic Beanstalk, Review and Create user. Write down Access Key ID and Secreat Access Key. In Travis-CI website, find repos and create Environment variables for AWS (AWS_ACCESS_KEY and AWS_SECRET_KEY)
+Search for IAM, click User, Add User and make a user `docker-react-travis-ci`, provide programmatic access. Click Next, Attach Existing policies directly and grant full access to AWS Elastic Beanstalk, Review and Create user. Write down Access Key ID and Secreat Access Key. In Travis-CI website, find repos and create Environment variables for AWS (AWS_ACCESS_KEY and AWS_SECRET_KEY)
 
 We have to expose ports for production deployment. Elastic beanstalk directly maps any port in Docker to port 80.
