@@ -12,6 +12,8 @@
 
 [Storage Solutions for Kubernetes](notes/storage-solutions.md)
 
+[Kubernetes Multi-node installation](notes/installation.md)
+
 
 # Common Kubernetes Commands
 
