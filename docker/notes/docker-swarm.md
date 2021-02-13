@@ -190,3 +190,12 @@ docker node inspect worker1 --format "{{ .Status.State  }}"
 # From Bastion host stop worker1 node and check status
 docker-machine stop worker1
 ```
+
+Deploy multiple services
+
+```shell
+git clone https://github.com/singh-ashok/example-voting-app.git
+cd example-voting-app
+docker stack deploy --compose-file docker-stack.yml vote
+docker service ls
+```
