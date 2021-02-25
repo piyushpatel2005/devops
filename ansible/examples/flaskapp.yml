@@ -1,0 +1,11 @@
+---
+- hosts: centos
+  become: true
+  tasks:
+  - name: Install Docker
+    yum: name=docker state=latest
+  - name: Start Docker service
+    service: name=docker state=started
+  - name: Start Flask app on port 80
+    shell:
+      cmd: docker run -dit -p 80:4040 --name flaskapp <username>/flaskapp:v2.0

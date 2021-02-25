@@ -1,0 +1,29 @@
+---
+- name: Deploy k8 cluster
+  gather_facts: False
+  become: true
+  vars:
+    kube_api_server: ChangeMe
+  hosts: master
+  tasks:
+    - name: Initialise k8 cluster
+      shell:
+        cmd: kubeadm init --apiserver-advertise-address={{ kube_api_server }} --kubernetes-version stable-1.18 --ignore-preflight-errors=NumCPU
+
+    - name: Setup kube config
+      shell:
+        cmd: mkdir -p $HOME/.kube;sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config;sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+    - name: Check Status of Cluster
+      shell:
+        cmd: kubectl get pods --all-namespaces
+
+    - name: Apply your Pod networking (Weave net)
+      shell:
+        cmd: sudo mkdir -p /var/lib/weave; head -c 16 /dev/urandom | shasum -a 256 | cut -d" " -f1 | sudo tee /var/lib/weave/weave-passwd;kubectl create secret -n kube-system generic weave-passwd --from-file=/var/lib/weave/weave-passwd
+
+
+    - name: Apply your Pod networking 
+      shell:
+        cmd: kubectl apply -f "https://cloud.weave.works/k8s/net?k8s-version=$(kubectl version | base64 | tr -d '\n')&password-secret=weave-passwd&env.IPALLOC_RANGE=192.168.0.0/24"
+

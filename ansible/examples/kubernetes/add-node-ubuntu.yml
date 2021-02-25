@@ -1,0 +1,21 @@
+---
+- name: Add node
+  gather_facts: False
+  become: true
+  vars:
+    kube_api_server: ChangeMe
+    token: ChangeMe
+    disc_token: ChangeMe
+  hosts: worker
+  tasks:
+    - name: join k8-cluster
+      shell:
+        cmd: kubeadm join {{ kube_api_server }}:6443 --token {{ token }} --discovery-token-ca-cert-hash {{ disc_token }}
+
+#root@k8-master-2:~# kubeadm token generate
+#xl04cj.i4gfrkkg97rouyff
+#root@k8-master-2:~# kubeadm token create <generated-token> --print-join-command --ttl=0
+#-su: generated-token: No such file or directory
+#root@k8-master-2:~# kubeadm token create xl04cj.i4gfrkkg97rouyff  --print-join-command --ttl=0
+#W0612 20:12:22.544455    9495 configset.go:202] WARNING: kubeadm cannot validate component configs for API groups [kubelet.config.k8s.io kubeproxy.config.k8s.io]
+#kubeadm join 172.31.45.2:6443 --token xl04cj.i4gfrkkg97rouyff     --discovery-token-ca-cert-hash sha256:3c5e7e457f70fa6a8a0dd3e14b2f0f159b171d43771e65e35eacbbd7d4e7bdda 

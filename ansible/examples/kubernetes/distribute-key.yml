@@ -1,0 +1,10 @@
+---
+- name: Generate and disribute keys
+  vars:
+    user: ubuntu
+  hosts: localhost
+  tasks:
+    - name: Distribute key
+      shell:
+        cmd: cat devops.pub | ssh -i devops -o "StrictHostKeyChecking = no" {{ user }}@{{ item }} "cat >> ~/.ssh/authorized_keys"
+      with_items:

@@ -1,0 +1,48 @@
+---
+- name: Configure all nodes
+  hosts: master worker
+  gather_facts: False
+  become: true
+  tasks:
+    - name: Run the equivalent of "apt-get update" as a separate step
+      apt: 
+       update_cache: yes
+    - name: Install docker
+      apt: name=docker.io state=latest
+    - name: Start docker service
+      service: name=docker state=started
+    - name: Enable service docker , and not touch the state
+      service: name=docker enabled=yes
+    - name: Install apt-transport-https
+      apt: name=apt-transport-https state=latest
+    - name: Configure K8 Repo
+      shell:
+        cmd: curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
+    - name: perform package update
+      shell:
+        cmd: echo "deb http://apt.kubernetes.io/ kubernetes-xenial main"  | sudo tee -a /etc/apt/sources.list.d/kubernetes.list  && sudo apt-get update 
+    - name: Install kubelet
+      apt: name=kubelet state=latest
+    - name: Install kubeadm
+      apt: name=kubeadm state=latest
+    - name: Install kubectl
+      apt: name=kubectl state=latest
+    - name: Install kubernetes-cni
+      apt: name=kubernetes-cni state=latest
+    - name: Start kubelet service
+      service: name=kubelet state=started
+    - name: Enable service kubelet, and not touch the state
+      service: name=kubelet enabled=yes
+    - name: Set Hostname on Nodes
+      shell:
+        cmd: sudo hostnamectl set-hostname "{{ group_name}}"-{{ item }}
+      with_items:
+          - 1
+          - 2
+    - name: Update  hosts file
+      copy:
+        src: files/hosts
+        dest: /etc/hosts
+#    - name: Disable SWAP
+#      shell:
+#        cmd: sudo swapoff -v /swapfile

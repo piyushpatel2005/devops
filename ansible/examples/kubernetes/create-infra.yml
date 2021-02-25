@@ -1,0 +1,58 @@
+---
+- name: Create Infra for K8-cluster
+  hosts: localhost
+  gather_facts: False
+  vars:
+    keypair: devops
+    instance_type: t2.micro
+    security_group: default
+#    Ubuntu ami-0eb89db7593b5d434 
+#    centos7 ami-09e5afc68eed60ef4
+    image: ami-0eb89db7593b5d434
+    region: eu-west-2
+    subnet: subnet-082213e51ccfdcaa4 
+  tasks:
+    - name: Generate key
+      shell:
+        cmd: ssh-keygen -q -t rsa -N '' -f ~/.ssh/id_rsa 2>/dev/null <<< y >/dev/null 
+        
+    - name: create key pair using key_material obtained using 'file' lookup plugin
+      ec2_key:
+         name: devops
+         key_material: "{{ lookup('file', '~/.ssh/id_rsa.pub') }}"
+    - name: Launch master instance
+      ec2:
+         count: 1 
+         key_name: "{{ keypair }}"
+         group: "{{ security_group }}"
+         instance_type: "{{ instance_type }}"
+         image: "{{ image }}"
+         instance_tags:
+            Name: Devops-Master-{{item}}
+            environment: ops
+            node-type: master
+         wait: true
+         region: "{{ region }}"
+         vpc_subnet_id: "{{ subnet }}"
+         assign_public_ip: yes
+      register: ec2
+      with_items:
+         - 1
+    - name: Launch node instance
+      ec2:
+         key_name: "{{ keypair }}"
+         group: "{{ security_group }}"
+         instance_type: "{{ instance_type }}"
+         image: "{{ image }}"
+         instance_tags:
+            Name: Devops-Node-{{item}}
+            environment: ops 
+            node-type: worker
+         wait: true
+         region: "{{ region }}"
+         vpc_subnet_id: "{{ subnet }}"
+         assign_public_ip: yes
+      register: ec2
+      with_items:
+         - 1
+#         - 2

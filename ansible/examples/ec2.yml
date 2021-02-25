@@ -1,0 +1,25 @@
+---
+- name: Create an EC2 instance
+  hosts: localhost
+  gather_facts: False
+  vars:
+    keypair: aws-key
+    instance_type: t2.micro
+    security_group: default
+    image: <AMI_ID>
+    region: <REGION_ID>
+    subnet: <SUBNET_ID>
+  tasks:
+    - name: Launch instance
+      ec2:
+        # count: 2
+        key_name: "{{ keypair }}"
+        group: "{{ security_group }}"
+        instance_type: "{{ instance_type }}"
+        image: "{{ image }}"
+        user_data: "{{ lookup('file', 'user_data') }}"
+        wait: true
+        region: "{{ region }}"
+        vpc_subnet_id: "{{ subnet }}"
+        assign_public_ip: yes
+      register: ec2
