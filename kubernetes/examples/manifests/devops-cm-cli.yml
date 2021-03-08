@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: devops-cm-cli
+spec:
+  container:
+    - name: consuming-container
+      image: k8s.gcr.io/busybox
+      command: [ "/bin/sh", "-c", "echo $(KEY_ONE); echo $(DEVOPS)" ]
+      env:
+        - name: KEY_ONE
+          valueFrom:
+            configMapKeyRef:
+              name: devops-cm
+              key: key.1
+        - name: DEVOPS
+          valueFrom:
+            configMapKeyRef:
+              name: devops-cm
+              key: devops
+  restartPolicy: Never

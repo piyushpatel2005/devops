@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: aws-ebs-nginx
+spec:
+  volumes:
+    - name: nginx-vol
+      persistentVolumeClaim:
+        claimName: app1-pvc-claim
+  containers:
+    - name: nginx-aws-efs
+      image: nginx
+      ports:
+        - containerPort: 80
+          name: "nginx"
+      volumeMounts:
+        - mountPath: "/usr/share/nginx/html"
+          name: nginx-vol

@@ -1,5 +1,7 @@
 # Kubernetes
 
+[Kubernetes Brief Notes](notes/kubernetes-notes.md)
+
 [Kubernetes notes](notes/intro.md)
 
 [Pods, Labels and annotations](notes/pods.md)

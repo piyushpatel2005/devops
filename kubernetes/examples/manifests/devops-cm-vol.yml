@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: devops-cm-vol
+spec:
+  containers:
+    - name: busybox
+      image: k8s.gcr.io/busybox
+      command: [ "/bin/sh","-c","cat /etc/config/keys" ]
+      volumeMounts:
+      - name: cm-volume
+        mountPath: /etc/config
+  volumes:    
+    - name: cm-volume
+      configMap:
+        name: devops-cm
+        items:
+        - key: devops
+          path: keys
+  restartPolicy: Never

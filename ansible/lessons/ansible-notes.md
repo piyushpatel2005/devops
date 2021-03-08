@@ -335,7 +335,7 @@ ansible -m shell -a "kubectl get no" -i ec2-k8.py master --become
 ansible-playboook -i ec2-k8.py add-node-ubuntu.yml
 ansible -m shell -a "kubectl get no" -i ec2-k8.py master --become
 
-# Run an app on pod
+# Run an app on pod. This cannot be accessed directly from outside kubernetes network
 kubectl apply -f flask-app.yml
 
 # Expose NodePort for service access
@@ -346,3 +346,11 @@ kubectl get svc
 
 # Try to access http://<PUBLIC_IP>:<SVC_PORT>
 ```
+
+```shell
+kubectl get pods
+kubectl get nodes --all-namespaces
+kubectl get pods -o wide --all-namespaces
+```
+
+

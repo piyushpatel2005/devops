@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: devops-cm
+  namespace: default
+data:
+  key.1: Welcome
+  key.2: Kubernetes
+  devops: |-
+    name="Kubernetes Secret"
+    course="Kubernetes"
+    author="Admin"
+    Chapter="kubernetes - configmaps"

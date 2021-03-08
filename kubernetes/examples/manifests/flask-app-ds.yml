@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: flask-app
+  namespace: kube-system
+  labels:
+    k8s-app: flask-app
+spec:
+  selector:
+    matchLabels:
+      name: flask-app
+  template:
+    metadata:
+      labels:
+        name: flask-app
+    spec:
+      tolerations:
+      # this toleration is to have the daemonset runnable on master nodes
+      # remove it if your masters can't run pods
+      - key: node-role.kubernetes.io/master
+        effect: NoSchedule
+      containers:
+      - name: flask-app
+        image: <username>/flaskapp:v1.0
+        ports:
+        - containerPort: 4080
