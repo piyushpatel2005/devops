@@ -12,6 +12,8 @@ unzip terraform_0.12.28_linux_amd64.zip
 sudo mv terraform /usr/local/bin/
 ```
 
+Infrastructure is defined using a high-level configuration files. Terraform has a planning step where it generates execution plan. This shows what Terraform will do when we call `apply`. Terraform builds a graph of all your resources and parallelizes the creation and modification of any non-dependent resources. Complex change sets can be applied to infrastructure with minimal human interaction. 
+
 Terraform integrates with providers to create different resources. It has many different providers to integrate with different cloud providers. **Resources** are the most important element in Terraform. Each resource block describes one or more infrastructure objects, such as compute instances, VPC, subnet, etc.
 
 ```golang
@@ -20,6 +22,17 @@ resource "aws_instance" "bastion" {
   instance_type = "t2.micro"
 }
 ```
+
+Terraform use HCL (Hashicorp Configuration Language) to describe the infrastructure. It defines provider and resouces. If we are using multiple resources together, it creates a module. The basic syntax looks like this.
+
+```
+block_type "block_label" "block_label" {
+  # block body
+  identifier = expression # argument
+}
+```
+
+Arguemnts assign a value to a name and appear within the blocks. Expressions represent value either literally or by referring other values.
 
 ```shell
 # Attach a role to Bastion host or add AWS credentials
@@ -34,9 +47,14 @@ terraform plan
 terraform apply
 # clean up resources
 terraform destroy
+# terraform console allows to verify variable names
+cd examples/terraform-basics
+terraform console
+"${var.name}"
+exit
 ```
 
-Terraform graph command is used to generate a visual representation of either a configuration or execution plan. The output is in DOT format which can be used by GraphViz to generate charts.
+Terraform graph command is used to generate a visual representation of either a configuration or execution plan. The output is in DOT format which can be used by GraphViz to generate charts. 
 
 ```shell
 sudo yum -y install graphviz
@@ -109,3 +127,91 @@ The template_file  data source renders a template from a template string which i
 A module is a group of terraform file to achieve desired functionality. It creates multiple resources that are used together to perform one or more function of desired architecture. the `.tf` files in working directory together form the root module. That module may call other modules and connect them together by passing output values from one to another.
 
 Terraform registry is a web interface of all publicly available modules. These modules are organized based on providers. It provides more structured information on available module and their use in Terraform ecosystem. This can be accessed [here](https://registry.terraform.io)
+
+## Details:
+
+In order to allow Terraform to create and modify resources on AWS, we need to create IAM user and provide AdministratorAccess. Generate the ACCESS KEY and SECRET KEY for this user. For every new directory or file, we need to run `terraform init`. Create below file `examples/createInstance.tf`.
+
+```golang
+provider "aws" {
+    access_key = "ACCESS KEY"
+    secret_key = "SECRET KEY"
+    region = "us-east-2"
+}
+
+resource "aws_instance" "MyFirstInstance" {
+    ami = "ami-05692172625678b4e"
+    instance_type = "t2.micro"
+}
+```
+
+```shell
+cd examples/terraform-basics
+terraform apply
+# To clean up the resources
+terraform destroy
+# Show the plan for Terraform configuration
+terraform plan
+terraform plan --out myfirstplan.out
+terraform apply "myfirstplan.out"
+```
+
+Let's see how we can provide credentials separately. Now, I have separated `provider.tf` to provide the credentials and removed that section from `createInstance.tf` file.
+
+```shell
+cd examples/terraform-basics
+terraform plan
+terraform apply
+terraform destroy
+```
+
+We can also supply credentials in the environmental variables by creating following environment variables.
+
+```shell
+export AWS_ACCESS_KEY_ID="AWS_ACCESS_KEY"
+export AWS_SECRET_ACCESS_KEY="AWS_SECRET_KEY"
+export AWS_DEFAULT_REGION="us-east-2"
+env | grep -i AWS
+cd examples/terraform-basics
+rm provider.tf
+terraform plan
+terraform apply
+terraform destroy
+```
+
+If we want to create multiple instances of the same type, we can modify the `createInstance.tf` file as below.
+
+```golang
+resource "aws_instance" "MyFirstInstance" {
+  count = 3
+  ami = "ami-05692172625678b4e"
+  instance_type = "t2.micro"
+  tags = {
+    Name = "demoinstance-${count.index}"
+  }
+}
+```
+
+Variables are used to parameterize deployment using Terraform. Input variables enable user to pass configuration values at the time of deployment. This allows deployment of development, staging or production environments using the same resource declarations with different configurations. Terraform input variables are defined using variable block with variable name and other option parameters for the variables. These variable blocks can be placed in any `.tf` file within Terraform project. Usually this file is called `variables.tf`. While specifying variable, we must provide `type` to define datatype as string, number, object and other supported data types. We can also provide `default` value or `description` parameters. Inside, input variables, we can also provide conditional input variables. When defining input variables, it can have a custom validation rules defined. These are defined by adding a validation block within the variable block for the Input Variable.
+
+Variable tyes include string, bool and number as primitive types. It can also have complex types like collection type or structural types. These include list, map, set, object, tuple. We can use multiple configuration files to store variables. This means we can use variables to manage the secrets and avoid pushing AWS credentials in Git repo.
+
+Now the structure looks like this. We create `vars.tf` or `variables.tf` to define varibles and their values. We can use those variables inside `provider.tf` file like `${var.AWS_ACCESS_KEY}`. We can create `terraform.tfvars` to keep secret information like ACCESS_KEY or SECRET_KEY and add that file inside `.gitignore` to avoid committing it in version control.
+
+```shell
+examples/terraform-variables
+terraform init
+terraform plan # It fails due to some variables not defined, but we can pass during this execution interactively.
+# Another way to pass these variables is below.
+terraform plan --var AWS_ACCESS_KEY="ACCESS_KEY" --var  AWS_SECRET_KEY="SECRET_KEY"
+# Now, I create terraform.tfvars file and add this to gitignore file.
+terraform plan # It reads tfvars file to read secrets
+```
+
+For examples of list and map look into Security_Group and AMI_ID. In AWS, AMI ID is dependent on the region, so that can be defined using map variable. For list of security groups, it will apply all of those security group to the instances created.
+
+
+```shell
+terraform plan
+terraform plan --var AWS_REGION="us-west-2"
+```
