@@ -199,7 +199,7 @@ Variable tyes include string, bool and number as primitive types. It can also ha
 Now the structure looks like this. We create `vars.tf` or `variables.tf` to define varibles and their values. We can use those variables inside `provider.tf` file like `${var.AWS_ACCESS_KEY}`. We can create `terraform.tfvars` to keep secret information like ACCESS_KEY or SECRET_KEY and add that file inside `.gitignore` to avoid committing it in version control.
 
 ```shell
-examples/terraform-variables
+cd examples/terraform-variables
 terraform init
 terraform plan # It fails due to some variables not defined, but we can pass during this execution interactively.
 # Another way to pass these variables is below.
@@ -215,3 +215,85 @@ For examples of list and map look into Security_Group and AMI_ID. In AWS, AMI ID
 terraform plan
 terraform plan --var AWS_REGION="us-west-2"
 ```
+
+### Provision Software with Terraform
+
+There are two ways to install software. (1) Build a custom AMI, (2) Boot up the standard AMI and install software at runtime. To install softwares, we can create a shell script and we can pass that script into the instance and run it. Below is a snippet of code. We can use `remote-exec` to execute the script. Check full source code inside `examples/terraform-software-provisioning` directory.
+
+```golang
+provisioner "file" {
+  source="installNginx.sh"
+  destination="/etc/installNginx.sh"
+  connection {
+    user = var.instance_user
+    password = var.instance_pass
+  }
+}
+```
+
+```shell
+examples/terraform-software-provisioning
+terraform init
+terraform plan
+terraform destroy
+```
+
+Terraform provides DataSource for cloud providers like AWS. It provides dynamic information about entities that are not managed by the current Terraform and configuration. DataSource also provides all IPs in use by AWS. This can help in IP based traffic filter.
+
+We can create a dynamic security group as shown in `securitygroup.tf` file in below directories.
+
+```shell
+cd examples/terraform-software-provisioning/DemoDataSource
+terraform plan
+terraform apply
+terraform destroy
+```
+
+### Output
+
+Terraform keeps output of all resources and its attributes. We can also query the output in Terraform. Output values are like return values of a Terraform module which can be used by a child module to expose a subset of its resource attributes to a parent module. A root module can use outputs to print certain values in the CLI output after running `terraform apply`. When we are using remote state, root module outputs can be accessed by other configurations via `terraform_remote_state` data source.
+
+Each output value exported by a module must be declared using an output block
+
+```golang
+output "instance_ip_addr" {
+  value = aws_instance.server.private_ip
+}
+```
+
+Outputs are only rendered when Terraform applies the plan. so, it works only with `terraform apply`. We can also use output inside a script. We have created an output inside [CreateInstance](examples/terraform-software-provisioning/DemoDataSource/createInstance.tf) file.
+
+## Remote state
+
+Terraform records information about what infrastructure it created in Terraform state file (`terraform.tfstate`). It also maintains the backup of earlier statefile named `terraform.tfstate.backup`. If the remote state is changed and user executes `terraform apply` again, it will make changes to correct the remote state. There are few problems with this shared state files.
+
+1. To be able to use Terraform to update your infrastructure, each team members need access to the same state files. This means it needs to be stored in a shared location.
+2. As soon as data is shared, we can run into locking. If two members running `terraform apply`, it can result in race conditions or conflict or data loss and state file corruption.
+3. When making changes to infrastructure, it's best practice to isolate different environments.
+
+First problem could be solved using version control but then if we forget to pull new files and push, we will upload stale files to version control. Version control systems also do not provide any form of locking that would prevent two team members from running `terraform apply` on the same state file at the same time. All data in Terraform state files is stored in plain text. This is a sensitive data and should not be pushed in version control. So, the best way to manage shared storage for state files is to use built-in support for remote backends. Terraform backend determines how Terraform loads and stores state. TF will automatically store new state file when we apply a plan and it will pull new files before apply. Remote backend also provides support for locking. If someone is already running apply, they will have the lock and you will have to wait for your plan execution. Most of the remote backends natively support encryption in transit and encryption on disk of the state file.
+
+We can specify backend, for example, S3 as below. Wehn using S3 as backend, it's recommended to use `aws configure` instead of AWS environment variables.
+
+```golang
+terraform {
+  backend "s3" {
+    bucket = "mybucket"
+    key = "/path/to/key" // to separate the project
+    region = "us-east-1"
+  }
+}
+```
+
+Create S3 bucket with given name.
+
+```shell
+sudo apt-get update
+sudo apt-get install awscli --yes
+aws configure
+cd examples/terraform-software-provisioning/DemoDataSource
+terraform plan
+terraform apply
+terraform destroy
+```
+
